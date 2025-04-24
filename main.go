@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 
 	"protodesk/internal/app"
@@ -22,7 +23,9 @@ func main() {
 		Title:     "protodesk",
 		Width:     1024,
 		Height:    768,
-		OnStartup: application.Startup,
+		OnStartup: func(ctx context.Context) {
+			_ = application.Startup(ctx)
+		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
