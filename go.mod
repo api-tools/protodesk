@@ -4,7 +4,10 @@ go 1.23.0
 
 toolchain go1.24.2
 
-require github.com/wailsapp/wails/v2 v2.10.1
+require (
+	github.com/wailsapp/wails/v2 v2.10.1
+	google.golang.org/grpc v1.72.0
+)
 
 require (
 	github.com/bep/debounce v1.2.1 // indirect
@@ -34,7 +37,6 @@ require (
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
-	google.golang.org/grpc v1.72.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 )
 

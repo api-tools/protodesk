@@ -7,7 +7,16 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "",
-    "email": ""
-  }
+    "name": "Lukasz Chmielewski",
+    "email": "hops@Mac.home"
+  },
+  "info": {
+    "companyName": "ProtoDesk",
+    "productName": "ProtoDesk",
+    "productVersion": "0.1.0",
+    "copyright": "© 2025 ProtoDesk Contributors",
+    "comments": "A modern gRPC client desktop application"
+  },
+  "debugmode": true,
+  "platforms": ["windows", "darwin", "linux"]
 }
