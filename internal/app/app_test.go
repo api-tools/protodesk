@@ -2,12 +2,16 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"protodesk/pkg/models"
+	"protodesk/pkg/services"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
 
 func TestNewApp(t *testing.T) {
@@ -134,4 +138,79 @@ func TestApp_Shutdown(t *testing.T) {
 	// Test shutdown
 	app.Shutdown(ctx)
 	assert.False(t, app.IsServerConnected(profile.ID))
+}
+
+func TestApp_UpdateServerProfileErrors(t *testing.T) {
+	app := NewApp()
+	ctx := context.Background()
+
+	// Setup test environment
+	tmpDir, err := os.MkdirTemp("", "protodesk-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("HOME", tmpDir)
+	require.NoError(t, app.Startup(ctx))
+
+	// Test updating non-existent profile
+	nonExistentProfile := models.NewServerProfile("test", "localhost", 50051)
+	err = app.UpdateServerProfile(nonExistentProfile)
+	assert.Error(t, err)
+
+	// Test updating with invalid profile
+	profile, err := app.CreateServerProfile("test-server", "localhost", 50051, false, nil)
+	require.NoError(t, err)
+
+	invalidProfile := *profile
+	invalidProfile.Name = "" // Make it invalid
+	err = app.UpdateServerProfile(&invalidProfile)
+	assert.Error(t, err)
+}
+
+func TestApp_DeleteServerProfileErrors(t *testing.T) {
+	app := NewApp()
+	ctx := context.Background()
+
+	// Setup test environment
+	tmpDir, err := os.MkdirTemp("", "protodesk-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("HOME", tmpDir)
+	require.NoError(t, app.Startup(ctx))
+
+	// Test deleting non-existent profile
+	err = app.DeleteServerProfile("non-existent")
+	assert.Error(t, err)
+
+	// Test deleting connected profile with disconnect error
+	profile, err := app.CreateServerProfile("test-server", "localhost", 50051, false, nil)
+	require.NoError(t, err)
+
+	// Create a mock gRPC client that will fail to disconnect
+	mockClient := &services.MockGRPCClientManager{
+		ConnectFunc: func(ctx context.Context, target string, useTLS bool, certPath string) error {
+			return nil
+		},
+		DisconnectFunc: func(target string) error {
+			return fmt.Errorf("mock disconnect error")
+		},
+		GetConnectionFunc: func(target string) (*grpc.ClientConn, error) {
+			return &grpc.ClientConn{}, nil
+		},
+	}
+	app.profileManager.SetGRPCClient(mockClient)
+
+	// Connect to the profile
+	require.NoError(t, app.ConnectToServer(profile.ID))
+	assert.True(t, app.IsServerConnected(profile.ID))
+
+	// Attempt to delete - should fail due to disconnect error
+	err = app.DeleteServerProfile(profile.ID)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to disconnect")
+}
+
+func TestApp_Greet(t *testing.T) {
+	app := NewApp()
+	result := app.Greet("Test")
+	assert.Equal(t, "Hello Test, It's show time!", result)
 }

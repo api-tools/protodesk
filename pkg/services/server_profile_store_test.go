@@ -43,6 +43,28 @@ func TestNewSQLiteStore(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestNewSQLiteStore_Errors(t *testing.T) {
+	// Test with invalid directory path
+	store, err := NewSQLiteStore("/nonexistent/directory")
+	assert.Error(t, err)
+	assert.Nil(t, store)
+	assert.Contains(t, err.Error(), "failed to connect to database")
+
+	// Test with read-only directory
+	tmpDir, err := os.MkdirTemp("", "protodesk-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	// Make directory read-only
+	require.NoError(t, os.Chmod(tmpDir, 0555))
+	defer os.Chmod(tmpDir, 0755) // Restore permissions for cleanup
+
+	store, err = NewSQLiteStore(tmpDir)
+	assert.Error(t, err)
+	assert.Nil(t, store)
+	assert.Contains(t, err.Error(), "failed to connect to database")
+}
+
 func TestSQLiteStore_CRUD(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()

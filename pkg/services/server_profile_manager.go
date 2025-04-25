@@ -120,3 +120,10 @@ func (m *ServerProfileManager) DisconnectAll() {
 	}
 	m.activeClients = make(map[string]*grpc.ClientConn)
 }
+
+// SetGRPCClient sets the gRPC client manager (useful for testing)
+func (m *ServerProfileManager) SetGRPCClient(client GRPCClientManager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.grpcClient = client
+}
