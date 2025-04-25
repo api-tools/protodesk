@@ -11,7 +11,7 @@ import (
 // ServerProfileManager handles server profile operations and maintains active connections
 type ServerProfileManager struct {
 	store         ServerProfileStore
-	grpcClient    *GRPCClientManager
+	grpcClient    GRPCClientManager
 	activeClients map[string]*grpc.ClientConn
 	mu            sync.RWMutex
 }

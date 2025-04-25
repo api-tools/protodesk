@@ -10,20 +10,27 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// GRPCClientManager manages gRPC client connections
-type GRPCClientManager struct {
+// GRPCClientManager defines the interface for managing gRPC client connections
+type GRPCClientManager interface {
+	Connect(ctx context.Context, target string, useTLS bool, certPath string) error
+	Disconnect(target string) error
+	GetConnection(target string) (*grpc.ClientConn, error)
+}
+
+// DefaultGRPCClientManager manages gRPC client connections
+type DefaultGRPCClientManager struct {
 	connections map[string]*grpc.ClientConn
 }
 
-// NewGRPCClientManager creates a new GRPCClientManager
-func NewGRPCClientManager() *GRPCClientManager {
-	return &GRPCClientManager{
+// NewGRPCClientManager creates a new DefaultGRPCClientManager
+func NewGRPCClientManager() *DefaultGRPCClientManager {
+	return &DefaultGRPCClientManager{
 		connections: make(map[string]*grpc.ClientConn),
 	}
 }
 
 // Connect establishes a gRPC connection to the specified server
-func (m *GRPCClientManager) Connect(ctx context.Context, target string, useTLS bool, certPath string) error {
+func (m *DefaultGRPCClientManager) Connect(ctx context.Context, target string, useTLS bool, certPath string) error {
 	var opts []grpc.DialOption
 
 	if useTLS {
@@ -46,7 +53,7 @@ func (m *GRPCClientManager) Connect(ctx context.Context, target string, useTLS b
 }
 
 // Disconnect closes the connection to the specified server
-func (m *GRPCClientManager) Disconnect(target string) error {
+func (m *DefaultGRPCClientManager) Disconnect(target string) error {
 	if conn, exists := m.connections[target]; exists {
 		err := conn.Close()
 		if err != nil {
@@ -58,7 +65,7 @@ func (m *GRPCClientManager) Disconnect(target string) error {
 }
 
 // GetConnection returns an existing connection for the specified target
-func (m *GRPCClientManager) GetConnection(target string) (*grpc.ClientConn, error) {
+func (m *DefaultGRPCClientManager) GetConnection(target string) (*grpc.ClientConn, error) {
 	if conn, exists := m.connections[target]; exists {
 		return conn, nil
 	}

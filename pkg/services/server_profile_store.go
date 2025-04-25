@@ -59,6 +59,10 @@ func initializeSchema(db *sqlx.DB) error {
 }
 
 func (s *SQLiteStore) Create(ctx context.Context, profile *models.ServerProfile) error {
+	if err := profile.Validate(); err != nil {
+		return err
+	}
+
 	query := `
 		INSERT INTO server_profiles (
 			id, name, host, port, tls_enabled, certificate_path, created_at, updated_at
@@ -98,6 +102,10 @@ func (s *SQLiteStore) List(ctx context.Context) ([]*models.ServerProfile, error)
 }
 
 func (s *SQLiteStore) Update(ctx context.Context, profile *models.ServerProfile) error {
+	if err := profile.Validate(); err != nil {
+		return err
+	}
+
 	query := `
 		UPDATE server_profiles SET
 			name = ?,
