@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { Greet } from '@wailsjs/go/app/App'
+import { ref, onMounted, computed, watch } from 'vue'
+import { Greet, ListProtoDefinitionsByProfile } from '@wailsjs/go/app/App'
 import { useServerProfileStore } from '@/stores/serverProfile'
 
 const name = ref('')
@@ -75,172 +75,84 @@ function cancelEditProfile() {
   editingProfileId.value = null
 }
 
+// Service/method tree state
+const protoDefinitions = ref<any[]>([])
+const selectedProtoFileId = ref<string | null>(null)
+const services = computed(() => {
+  // Show services for the selected proto file only
+  const def = protoDefinitions.value.find(d => d.id === selectedProtoFileId.value)
+  return def ? (def.services || []) : []
+})
+const selectedService = ref<string | null>(null)
+const selectedMethod = ref<string | null>(null)
+
+// Watch for active profile and fetch proto definitions
+const activeProfile = computed(() => profileStore.activeProfile)
+
+async function fetchProtoDefinitions() {
+  if (!activeProfile.value) {
+    protoDefinitions.value = []
+    return
+  }
+  try {
+    const defs = await ListProtoDefinitionsByProfile(activeProfile.value.id)
+    protoDefinitions.value = defs || []
+  } catch (e) {
+    protoDefinitions.value = []
+  }
+}
+
+watch(activeProfile, fetchProtoDefinitions, { immediate: true })
+
+function selectMethod(serviceName: string, methodName: string) {
+  selectedService.value = serviceName
+  selectedMethod.value = methodName
+}
+
+function selectProtoFile(id: string) {
+  selectedProtoFileId.value = id
+  selectedService.value = null
+  selectedMethod.value = null
+}
+
 onMounted(() => {
   profileStore.loadProfiles()
 })
 </script>
 
 <template>
-  <div class="home">
-    <h1>Welcome to ProtoDesk</h1>
-    <div class="input-box">
-      <input v-model="name" type="text" placeholder="Enter your name" @keyup.enter="greet">
-      <button @click="greet">Greet</button>
-    </div>
-    <div class="result" v-if="resultText">{{ resultText }}</div>
-
-    <section class="profile-section">
-      <h2>Add Server Profile</h2>
-      <form @submit.prevent="addProfile" class="profile-form">
-        <input v-model="newProfile.name" type="text" placeholder="Profile Name" required>
-        <input v-model="newProfile.host" type="text" placeholder="Host" required>
-        <input v-model.number="newProfile.port" type="number" placeholder="Port" min="1" required>
-        <label><input v-model="newProfile.tlsEnabled" type="checkbox"> TLS Enabled</label>
-        <input v-model="newProfile.certificatePath" type="text" placeholder="Certificate Path (optional)">
-        <button type="submit">Add Profile</button>
-      </form>
-      <div v-if="profileStore.profiles.length > 0" class="profile-list">
-        <h3>Existing Profiles</h3>
-        <ul>
-          <li v-for="profile in profileStore.profiles" :key="profile.id">
-            <template v-if="editingProfileId === profile.id">
-              <input v-model="editProfileData.name" type="text" placeholder="Profile Name" required>
-              <input v-model="editProfileData.host" type="text" placeholder="Host" required>
-              <input v-model.number="editProfileData.port" type="number" placeholder="Port" min="1" required>
-              <label><input v-model="editProfileData.tlsEnabled" type="checkbox"> TLS Enabled</label>
-              <input v-model="editProfileData.certificatePath" type="text" placeholder="Certificate Path (optional)">
-              <button class="save-btn" @click="saveEditProfile(profile.id)">Save</button>
-              <button class="cancel-btn" @click="cancelEditProfile">Cancel</button>
-            </template>
-            <template v-else>
-              <strong>{{ profile.name }}</strong> ({{ profile.host }}:{{ profile.port }})
-              <span v-if="profile.tlsEnabled">🔒</span>
-              <span v-if="profile.certificatePath">[Cert: {{ profile.certificatePath }}]</span>
-              <button class="edit-btn" @click="startEditProfile(profile)">Edit</button>
-              <button class="delete-btn" @click="removeProfile(profile.id)">Delete</button>
-            </template>
-          </li>
-        </ul>
+  <div class="flex flex-row w-full h-full min-h-0 min-w-0 text-[0.8rem] overflow-hidden">
+    <!-- Left column: Service/Method Tree -->
+    <section class="flex flex-col flex-[2] min-w-[180px] max-w-[320px] h-full border-r border-[#2c3e50] bg-[#202733] p-6">
+      <h2 class="font-bold text-white mb-2">Services & Methods</h2>
+      <div v-if="!selectedProtoFileId" class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2">
+        Select a proto file to view its services and methods.
       </div>
+      <div v-else-if="services.length === 0" class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2">
+        No proto services found in this proto file.
+      </div>
+      <div v-else class="mt-2 space-y-4 overflow-y-auto">
+        <div v-for="service in services" :key="service.name">
+          <div class="font-semibold text-white mb-1">{{ service.name }}</div>
+          <div v-for="method in service.methods" :key="method.name"
+               class="ml-4 px-2 py-1 rounded cursor-pointer text-[#b0bec5] hover:bg-[#2c3e50] hover:text-white"
+               :class="{ 'bg-[#2c3e50] text-white': selectedService === service.name && selectedMethod === method.name }"
+               @click="selectMethod(service.name, method.name)">
+            {{ method.name }}
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- Middle column: Request Builder -->
+    <section class="flex flex-col flex-[3] h-full border-r border-[#2c3e50] bg-[#232b36] p-6">
+      <h2 class="font-bold text-white mb-2">Request Builder</h2>
+      <div class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2 flex-1">[Dynamic Request Form Here]</div>
+      <button class="mt-4 px-6 py-2 bg-[#42b983] text-[#222] rounded font-bold hover:bg-[#369870] transition self-start">Send</button>
+    </section>
+    <!-- Right column: Response Viewer -->
+    <section class="flex flex-col flex-[4] h-full bg-[#232b36] p-6">
+      <h2 class="font-bold text-white mb-2">Response</h2>
+      <div class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2 flex-1">[Response Viewer Here]</div>
     </section>
   </div>
 </template>
-
-<style scoped>
-.home {
-  text-align: center;
-  padding: 2rem;
-}
-
-.input-box {
-  margin: 1rem 0;
-}
-
-input {
-  padding: 0.5rem;
-  margin-right: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-button {
-  padding: 0.5rem 1rem;
-  background-color: #4CAF50;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-button:hover {
-  background-color: #45a049;
-}
-
-.result {
-  margin-top: 1rem;
-  padding: 1rem;
-  background-color: #29323b;
-  border-radius: 4px;
-}
-
-.profile-section {
-  margin-top: 2rem;
-  text-align: left;
-  max-width: 500px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.profile-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.profile-form input[type="text"],
-.profile-form input[type="number"] {
-  flex: 1 1 120px;
-}
-
-.profile-form label {
-  flex: 1 1 120px;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.profile-list {
-  margin-top: 1rem;
-}
-
-.profile-list ul {
-  list-style: none;
-  padding: 0;
-}
-
-.profile-list li {
-  margin-bottom: 0.5rem;
-}
-
-.delete-btn {
-  margin-left: 1rem;
-  background-color: #b71c1c;
-  color: white;
-}
-
-.delete-btn:hover {
-  background-color: #7f1d1d;
-}
-
-.save-btn {
-  margin-left: 1rem;
-  background-color: #1976d2;
-  color: white;
-}
-
-.save-btn:hover {
-  background-color: #0d47a1;
-}
-
-.cancel-btn {
-  margin-left: 0.5rem;
-  background-color: #757575;
-  color: white;
-}
-
-.cancel-btn:hover {
-  background-color: #424242;
-}
-
-.edit-btn {
-  margin-left: 1rem;
-  background-color: #ffb300;
-  color: #222;
-}
-
-.edit-btn:hover {
-  background-color: #ff8f00;
-}
-</style>

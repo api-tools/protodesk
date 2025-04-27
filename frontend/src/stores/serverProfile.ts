@@ -12,13 +12,15 @@ export interface ServerProfile {
   certificatePath?: string
   createdAt: Date
   updatedAt: Date
+  protoFolders?: string[]
 }
 
 function toFrontendProfile(profile: any): ServerProfile {
   return {
     ...profile,
     createdAt: new Date(profile.createdAt),
-    updatedAt: new Date(profile.updatedAt)
+    updatedAt: new Date(profile.updatedAt),
+    protoFolders: Array.isArray(profile.protoFolders) ? profile.protoFolders : [],
   }
 }
 
@@ -29,6 +31,7 @@ export const useServerProfileStore = defineStore('serverProfile', () => {
   async function loadProfiles() {
     const backendProfiles = await AppAPI.ListServerProfiles()
     profiles.value = backendProfiles.map(toFrontendProfile)
+    console.log('[DEBUG] Pinia store profiles after load:', profiles.value)
   }
 
   async function addProfile(profile: ServerProfile) {
@@ -58,7 +61,7 @@ export const useServerProfileStore = defineStore('serverProfile', () => {
 
   async function removeProfile(id: string) {
     await AppAPI.DeleteServerProfile(id)
-    profiles.value = profiles.value.filter(p => p.id !== id)
+    await loadProfiles()
     if (activeProfile.value?.id === id) {
       activeProfile.value = null
     }
