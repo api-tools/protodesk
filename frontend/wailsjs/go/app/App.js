@@ -10,6 +10,10 @@ export function CreateServerProfile(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['CreateServerProfile'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function DeleteProtoDefinition(arg1) {
+  return window['go']['app']['App']['DeleteProtoDefinition'](arg1);
+}
+
 export function DeleteServerProfile(arg1) {
   return window['go']['app']['App']['DeleteServerProfile'](arg1);
 }
@@ -26,12 +30,24 @@ export function Greet(arg1) {
   return window['go']['app']['App']['Greet'](arg1);
 }
 
+export function ImportProtoFilesFromFolder() {
+  return window['go']['app']['App']['ImportProtoFilesFromFolder']();
+}
+
 export function IsServerConnected(arg1) {
   return window['go']['app']['App']['IsServerConnected'](arg1);
 }
 
+export function ListProtoDefinitionsByProfile(arg1) {
+  return window['go']['app']['App']['ListProtoDefinitionsByProfile'](arg1);
+}
+
 export function ListServerProfiles() {
   return window['go']['app']['App']['ListServerProfiles']();
+}
+
+export function SaveProtoDefinition(arg1) {
+  return window['go']['app']['App']['SaveProtoDefinition'](arg1);
 }
 
 export function Shutdown(arg1) {

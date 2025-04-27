@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 
 	"protodesk/pkg/models"
+	"protodesk/pkg/models/proto"
 	"protodesk/pkg/services"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App struct represents the main application
@@ -116,4 +119,64 @@ func (a *App) Shutdown(ctx context.Context) {
 // Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
+}
+
+// SaveProtoDefinition saves a parsed proto definition to storage
+func (a *App) SaveProtoDefinition(def *proto.ProtoDefinition) error {
+	return a.profileManager.GetStore().CreateProtoDefinition(a.ctx, def)
+}
+
+// ListProtoDefinitionsByProfile lists proto definitions for a server profile
+func (a *App) ListProtoDefinitionsByProfile(profileID string) ([]*proto.ProtoDefinition, error) {
+	return a.profileManager.GetStore().ListProtoDefinitionsByProfile(a.ctx, profileID)
+}
+
+// DeleteProtoDefinition deletes a proto definition by ID
+func (a *App) DeleteProtoDefinition(id string) error {
+	return a.profileManager.GetStore().DeleteProtoDefinition(a.ctx, id)
+}
+
+// ProtoFileImport represents a proto file found in a folder
+// to be returned to the frontend
+type ProtoFileImport struct {
+	FilePath string `json:"filePath"`
+	Content  string `json:"content"`
+}
+
+// ImportProtoFilesFromFolder opens a folder picker, recursively finds all .proto files, and returns their paths and contents
+func (a *App) ImportProtoFilesFromFolder() ([]ProtoFileImport, error) {
+	if a.ctx == nil {
+		return nil, fmt.Errorf("context not initialized")
+	}
+	// Open folder picker dialog
+	folder, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select a folder containing proto files",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if folder == "" {
+		return nil, nil // user cancelled
+	}
+	var results []ProtoFileImport
+	err = filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && filepath.Ext(path) == ".proto" {
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			results = append(results, ProtoFileImport{
+				FilePath: path,
+				Content:  string(content),
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
 }

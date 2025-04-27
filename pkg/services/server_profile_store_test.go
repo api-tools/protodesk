@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"protodesk/pkg/models"
+	"protodesk/pkg/models/proto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -158,4 +159,64 @@ func TestSQLiteStore_Validation(t *testing.T) {
 	profile.Name = "" // Make it invalid
 	err = store.Update(ctx, profile)
 	require.Error(t, err)
+}
+
+func TestSQLiteStore_ProtoDefinitionCRUD(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create a proto definition
+	def := &proto.ProtoDefinition{
+		ID:              "test-proto",
+		FilePath:        "/tmp/test.proto",
+		Content:         "syntax = \"proto3\";",
+		Imports:         []string{"google/protobuf/empty.proto"},
+		Services:        []proto.Service{{Name: "TestService", Methods: nil, Description: ""}},
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		Description:     "Test proto definition",
+		Version:         "1",
+		ServerProfileID: "profile-1",
+	}
+
+	// Create
+	err := store.CreateProtoDefinition(ctx, def)
+	require.NoError(t, err)
+
+	// Get
+	got, err := store.GetProtoDefinition(ctx, def.ID)
+	require.NoError(t, err)
+	assert.Equal(t, def.ID, got.ID)
+	assert.Equal(t, def.FilePath, got.FilePath)
+	assert.Equal(t, def.Content, got.Content)
+	assert.Equal(t, def.Imports, got.Imports)
+	assert.Equal(t, def.Services[0].Name, got.Services[0].Name)
+	assert.Equal(t, def.ServerProfileID, got.ServerProfileID)
+
+	// List
+	defs, err := store.ListProtoDefinitions(ctx)
+	require.NoError(t, err)
+	assert.NotEmpty(t, defs)
+
+	// Update
+	def.Description = "Updated description"
+	def.UpdatedAt = time.Now()
+	err = store.UpdateProtoDefinition(ctx, def)
+	require.NoError(t, err)
+	got, err = store.GetProtoDefinition(ctx, def.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated description", got.Description)
+
+	// List by profile
+	byProfile, err := store.ListProtoDefinitionsByProfile(ctx, def.ServerProfileID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, byProfile)
+	assert.Equal(t, def.ID, byProfile[0].ID)
+
+	// Delete
+	err = store.DeleteProtoDefinition(ctx, def.ID)
+	require.NoError(t, err)
+	_, err = store.GetProtoDefinition(ctx, def.ID)
+	assert.Error(t, err)
 }

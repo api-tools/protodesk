@@ -6,6 +6,7 @@
   <div class="app">
     <nav>
       <router-link to="/">Home</router-link>
+      <router-link to="/proto-definitions">Proto Definitions</router-link>
     </nav>
     <main>
       <router-view></router-view>
