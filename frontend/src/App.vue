@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ServerTopBar from '@/components/ServerTopBar.vue'
+import StatusBar from '@/components/StatusBar.vue'
 </script>
 
 <template>
@@ -9,6 +10,7 @@ import ServerTopBar from '@/components/ServerTopBar.vue'
       <!-- 3-column layout will be implemented here -->
       <router-view></router-view>
     </main>
+    <StatusBar />
   </div>
 </template>
 
@@ -21,6 +23,7 @@ import ServerTopBar from '@/components/ServerTopBar.vue'
   display: flex;
   flex-direction: column;
   font-size: 0.8rem;
+  padding-bottom: 28px; /* Reserve space for the status bar */
 }
 
 main {

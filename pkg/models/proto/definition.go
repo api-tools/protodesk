@@ -19,6 +19,9 @@ type ProtoDefinition struct {
 	Description     string    `json:"description"`     // Optional description
 	Version         string    `json:"version"`         // Version of the proto definition
 	ServerProfileID string    `json:"serverProfileId"` // Linked server profile ID
+	ProtoPathID     string    `json:"protoPathId"`     // Linked proto path ID
+	LastParsed      time.Time `json:"lastParsed"`      // Last parsed timestamp
+	Error           string    `json:"error"`           // Parsing/validation error, if any
 }
 
 // Service represents a gRPC service defined in the proto file

@@ -6,8 +6,12 @@ export function ConnectToServer(arg1) {
   return window['go']['app']['App']['ConnectToServer'](arg1);
 }
 
-export function CreateServerProfile(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['CreateServerProfile'](arg1, arg2, arg3, arg4, arg5);
+export function CreateProtoPath(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreateProtoPath'](arg1, arg2, arg3);
+}
+
+export function CreateServerProfile(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['CreateServerProfile'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function DeleteProtoDefinition(arg1) {
@@ -48,6 +52,10 @@ export function ListServerProfiles() {
 
 export function SaveProtoDefinition(arg1) {
   return window['go']['app']['App']['SaveProtoDefinition'](arg1);
+}
+
+export function ScanAndParseProtoPath(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ScanAndParseProtoPath'](arg1, arg2, arg3);
 }
 
 export function SelectProtoFolder() {

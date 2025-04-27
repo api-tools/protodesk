@@ -7,7 +7,9 @@ import {context} from '../models';
 
 export function ConnectToServer(arg1:string):Promise<void>;
 
-export function CreateServerProfile(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:any):Promise<models.ServerProfile>;
+export function CreateProtoPath(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function CreateServerProfile(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:any,arg6:boolean):Promise<models.ServerProfile>;
 
 export function DeleteProtoDefinition(arg1:string):Promise<void>;
 
@@ -28,6 +30,8 @@ export function ListProtoDefinitionsByProfile(arg1:string):Promise<Array<proto.P
 export function ListServerProfiles():Promise<Array<models.ServerProfile>>;
 
 export function SaveProtoDefinition(arg1:proto.ProtoDefinition):Promise<void>;
+
+export function ScanAndParseProtoPath(arg1:string,arg2:string,arg3:string):Promise<Array<proto.ProtoDefinition>>;
 
 export function SelectProtoFolder():Promise<string>;
 

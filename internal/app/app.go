@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"protodesk/pkg/models"
 	"protodesk/pkg/models/proto"
 	"protodesk/pkg/services"
 
+	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -27,34 +29,44 @@ func NewApp() *App {
 // Startup is called when the app starts. The context is saved
 // so we can call the runtime methods
 func (a *App) Startup(ctx context.Context) error {
+	fmt.Println("[Startup] Startup called")
 	a.ctx = ctx
 
-	// Initialize data directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		fmt.Println("[Startup] Failed to get user home directory:", err)
 		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
+	fmt.Println("[Startup] Home directory:", homeDir)
 
 	dataDir := filepath.Join(homeDir, ".protodesk")
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		fmt.Println("[Startup] Failed to create data directory:", err)
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
+	fmt.Println("[Startup] Data directory:", dataDir)
 
-	// Initialize server profile store and manager
 	store, err := services.NewSQLiteStore(dataDir)
 	if err != nil {
+		fmt.Println("[Startup] Failed to initialize server profile store:", err)
 		return fmt.Errorf("failed to initialize server profile store: %w", err)
 	}
+	fmt.Println("[Startup] Server profile store initialized")
 
 	a.profileManager = services.NewServerProfileManager(store)
+	fmt.Println("[Startup] profileManager initialized successfully")
 	return nil
 }
 
 // CreateServerProfile creates a new server profile
-func (a *App) CreateServerProfile(name string, host string, port int, enableTLS bool, certPath *string) (*models.ServerProfile, error) {
+func (a *App) CreateServerProfile(name string, host string, port int, enableTLS bool, certPath *string, useReflection bool) (*models.ServerProfile, error) {
+	if a.profileManager == nil {
+		return nil, fmt.Errorf("profileManager is not initialized (did Startup run successfully?)")
+	}
 	profile := models.NewServerProfile(name, host, port)
 	profile.TLSEnabled = enableTLS
 	profile.CertificatePath = certPath
+	profile.UseReflection = useReflection
 
 	if err := profile.Validate(); err != nil {
 		return nil, err
@@ -193,4 +205,62 @@ func (a *App) SelectProtoFolder() (string, error) {
 		return "", err
 	}
 	return folder, nil
+}
+
+// ScanAndParseProtoPath scans a proto path, parses all .proto files, and stores results in the DB
+func (a *App) ScanAndParseProtoPath(serverID, protoPathID, path string) ([]*proto.ProtoDefinition, error) {
+	parser := proto.NewParser([]string{path})
+	var results []*proto.ProtoDefinition
+	err := filepath.Walk(path, func(file string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Ext(file) != ".proto" {
+			return nil
+		}
+		content, readErr := os.ReadFile(file)
+		if readErr != nil {
+			return readErr
+		}
+		pd := proto.NewProtoDefinition(file, string(content))
+		pd.ServerProfileID = serverID
+		pd.ProtoPathID = protoPathID
+		pd.LastParsed = time.Now()
+		// Try to parse
+		parsed, parseErr := parser.ParseFile(file)
+		if parseErr != nil {
+			pd.Error = parseErr.Error()
+		} else {
+			pd.Imports = parsed.Imports
+			pd.Services = parsed.Services
+			pd.Error = ""
+		}
+		// Save or update in DB
+		existing, _ := a.profileManager.GetStore().GetProtoDefinition(a.ctx, pd.ID)
+		if existing != nil {
+			_ = a.profileManager.GetStore().UpdateProtoDefinition(a.ctx, pd)
+		} else {
+			pd.ID = uuid.New().String()
+			_ = a.profileManager.GetStore().CreateProtoDefinition(a.ctx, pd)
+		}
+		results = append(results, pd)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// CreateProtoPath creates a proto path record in the database and links it to a server profile
+func (a *App) CreateProtoPath(id, serverProfileId, path string) error {
+	if a.profileManager == nil {
+		return fmt.Errorf("profile manager not initialized; startup may not have run successfully")
+	}
+	protoPath := &services.ProtoPath{
+		ID:              id,
+		ServerProfileID: serverProfileId,
+		Path:            path,
+	}
+	return a.profileManager.GetStore().CreateProtoPath(context.Background(), protoPath)
 }

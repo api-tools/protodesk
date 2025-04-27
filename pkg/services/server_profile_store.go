@@ -27,6 +27,11 @@ type ServerProfileStore interface {
 	UpdateProtoDefinition(ctx context.Context, def *proto.ProtoDefinition) error
 	DeleteProtoDefinition(ctx context.Context, id string) error
 	ListProtoDefinitionsByProfile(ctx context.Context, profileID string) ([]*proto.ProtoDefinition, error)
+
+	// Add proto path CRUD methods
+	CreateProtoPath(ctx context.Context, path *ProtoPath) error
+	ListProtoPathsByServer(ctx context.Context, serverID string) ([]*ProtoPath, error)
+	DeleteProtoPath(ctx context.Context, id string) error
 }
 
 // SQLiteStore implements ServerProfileStore using SQLite
@@ -41,6 +46,8 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
+	// Enable foreign key enforcement
+	_, _ = db.Exec("PRAGMA foreign_keys = ON;")
 
 	if err := initializeSchema(db); err != nil {
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
@@ -51,6 +58,7 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 
 func initializeSchema(db *sqlx.DB) error {
 	schema := `
+	DROP TABLE IF EXISTS server_profiles;
 	CREATE TABLE IF NOT EXISTS server_profiles (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -58,11 +66,22 @@ func initializeSchema(db *sqlx.DB) error {
 		port INTEGER NOT NULL,
 		tls_enabled BOOLEAN DEFAULT FALSE,
 		certificate_path TEXT,
+		use_reflection BOOLEAN DEFAULT FALSE,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_server_profiles_name ON server_profiles(name);
 
+	CREATE TABLE IF NOT EXISTS proto_paths (
+		id TEXT PRIMARY KEY,
+		server_profile_id TEXT NOT NULL,
+		path TEXT NOT NULL,
+		UNIQUE(server_profile_id, path),
+		FOREIGN KEY(server_profile_id) REFERENCES server_profiles(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_proto_paths_profile ON proto_paths(server_profile_id);
+
+	DROP TABLE IF EXISTS proto_definitions;
 	CREATE TABLE IF NOT EXISTS proto_definitions (
 		id TEXT PRIMARY KEY,
 		file_path TEXT NOT NULL,
@@ -74,9 +93,14 @@ func initializeSchema(db *sqlx.DB) error {
 		description TEXT,
 		version TEXT,
 		server_profile_id TEXT,
-		FOREIGN KEY(server_profile_id) REFERENCES server_profiles(id) ON DELETE CASCADE
+		proto_path_id TEXT,
+		last_parsed DATETIME,
+		error TEXT,
+		FOREIGN KEY(server_profile_id) REFERENCES server_profiles(id) ON DELETE CASCADE,
+		FOREIGN KEY(proto_path_id) REFERENCES proto_paths(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_proto_definitions_profile ON proto_definitions(server_profile_id);
+	CREATE INDEX IF NOT EXISTS idx_proto_definitions_path ON proto_definitions(proto_path_id);
 	`
 	_, err := db.Exec(schema)
 	return err
@@ -89,8 +113,8 @@ func (s *SQLiteStore) Create(ctx context.Context, profile *models.ServerProfile)
 
 	query := `
 		INSERT INTO server_profiles (
-			id, name, host, port, tls_enabled, certificate_path, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			id, name, host, port, tls_enabled, certificate_path, use_reflection, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		profile.ID,
@@ -99,6 +123,7 @@ func (s *SQLiteStore) Create(ctx context.Context, profile *models.ServerProfile)
 		profile.Port,
 		profile.TLSEnabled,
 		profile.CertificatePath,
+		profile.UseReflection,
 		profile.CreatedAt,
 		profile.UpdatedAt,
 	)
@@ -137,6 +162,7 @@ func (s *SQLiteStore) Update(ctx context.Context, profile *models.ServerProfile)
 			port = ?,
 			tls_enabled = ?,
 			certificate_path = ?,
+			use_reflection = ?,
 			updated_at = ?
 		WHERE id = ?
 	`
@@ -146,6 +172,7 @@ func (s *SQLiteStore) Update(ctx context.Context, profile *models.ServerProfile)
 		profile.Port,
 		profile.TLSEnabled,
 		profile.CertificatePath,
+		profile.UseReflection,
 		profile.UpdatedAt,
 		profile.ID,
 	)
@@ -192,8 +219,8 @@ func (s *SQLiteStore) CreateProtoDefinition(ctx context.Context, def *proto.Prot
 	}
 	query := `
 		INSERT INTO proto_definitions (
-			id, file_path, content, imports, services, created_at, updated_at, description, version, server_profile_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, file_path, content, imports, services, created_at, updated_at, description, version, server_profile_id, proto_path_id, last_parsed, error
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err = s.db.ExecContext(ctx, query,
 		def.ID,
@@ -206,6 +233,9 @@ func (s *SQLiteStore) CreateProtoDefinition(ctx context.Context, def *proto.Prot
 		def.Description,
 		def.Version,
 		def.ServerProfileID,
+		def.ProtoPathID,
+		def.LastParsed,
+		def.Error,
 	)
 	return err
 }
@@ -222,6 +252,9 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 		Description     string `db:"description"`
 		Version         string `db:"version"`
 		ServerProfileID string `db:"server_profile_id"`
+		ProtoPathID     string `db:"proto_path_id"`
+		LastParsed      string `db:"last_parsed"`
+		Error           string `db:"error"`
 	}
 	query := `SELECT * FROM proto_definitions WHERE id = ?`
 	err := s.db.GetContext(ctx, &row, query, id)
@@ -234,6 +267,7 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 	_ = json.Unmarshal([]byte(row.Services), &services)
 	createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
 	updatedAt, _ := time.Parse(time.RFC3339, row.UpdatedAt)
+	lastParsed, _ := time.Parse(time.RFC3339, row.LastParsed)
 	return &proto.ProtoDefinition{
 		ID:              row.ID,
 		FilePath:        row.FilePath,
@@ -245,6 +279,9 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 		Description:     row.Description,
 		Version:         row.Version,
 		ServerProfileID: row.ServerProfileID,
+		ProtoPathID:     row.ProtoPathID,
+		LastParsed:      lastParsed,
+		Error:           row.Error,
 	}, nil
 }
 
@@ -260,6 +297,9 @@ func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoD
 		Description     string `db:"description"`
 		Version         string `db:"version"`
 		ServerProfileID string `db:"server_profile_id"`
+		ProtoPathID     string `db:"proto_path_id"`
+		LastParsed      string `db:"last_parsed"`
+		Error           string `db:"error"`
 	}
 	query := `SELECT * FROM proto_definitions`
 	err := s.db.SelectContext(ctx, &rows, query)
@@ -285,6 +325,7 @@ func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoD
 			Description:     row.Description,
 			Version:         row.Version,
 			ServerProfileID: row.ServerProfileID,
+			ProtoPathID:     row.ProtoPathID,
 		})
 	}
 	return defs, nil
@@ -308,7 +349,10 @@ func (s *SQLiteStore) UpdateProtoDefinition(ctx context.Context, def *proto.Prot
 			updated_at = ?,
 			description = ?,
 			version = ?,
-			server_profile_id = ?
+			server_profile_id = ?,
+			proto_path_id = ?,
+			last_parsed = ?,
+			error = ?
 		WHERE id = ?
 	`
 	result, err := s.db.ExecContext(ctx, query,
@@ -320,6 +364,9 @@ func (s *SQLiteStore) UpdateProtoDefinition(ctx context.Context, def *proto.Prot
 		def.Description,
 		def.Version,
 		def.ServerProfileID,
+		def.ProtoPathID,
+		def.LastParsed,
+		def.Error,
 		def.ID,
 	)
 	if err != nil {
@@ -363,6 +410,9 @@ func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profile
 		Description     string `db:"description"`
 		Version         string `db:"version"`
 		ServerProfileID string `db:"server_profile_id"`
+		ProtoPathID     string `db:"proto_path_id"`
+		LastParsed      string `db:"last_parsed"`
+		Error           string `db:"error"`
 	}
 	query := `SELECT * FROM proto_definitions WHERE server_profile_id = ?`
 	err := s.db.SelectContext(ctx, &rows, query, profileID)
@@ -388,7 +438,49 @@ func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profile
 			Description:     row.Description,
 			Version:         row.Version,
 			ServerProfileID: row.ServerProfileID,
+			ProtoPathID:     row.ProtoPathID,
 		})
 	}
 	return defs, nil
+}
+
+// ProtoPath represents a proto folder path linked to a server
+type ProtoPath struct {
+	ID              string
+	ServerProfileID string
+	Path            string
+}
+
+func (s *SQLiteStore) CreateProtoPath(ctx context.Context, path *ProtoPath) error {
+	query := `INSERT INTO proto_paths (id, server_profile_id, path) VALUES (?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, query, path.ID, path.ServerProfileID, path.Path)
+	return err
+}
+
+func (s *SQLiteStore) ListProtoPathsByServer(ctx context.Context, serverID string) ([]*ProtoPath, error) {
+	var rows []struct {
+		ID              string `db:"id"`
+		ServerProfileID string `db:"server_profile_id"`
+		Path            string `db:"path"`
+	}
+	query := `SELECT * FROM proto_paths WHERE server_profile_id = ?`
+	err := s.db.SelectContext(ctx, &rows, query, serverID)
+	if err != nil {
+		return nil, err
+	}
+	var paths []*ProtoPath
+	for _, row := range rows {
+		paths = append(paths, &ProtoPath{
+			ID:              row.ID,
+			ServerProfileID: row.ServerProfileID,
+			Path:            row.Path,
+		})
+	}
+	return paths, nil
+}
+
+func (s *SQLiteStore) DeleteProtoPath(ctx context.Context, id string) error {
+	query := `DELETE FROM proto_paths WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, query, id)
+	return err
 }

@@ -14,6 +14,7 @@ type ServerProfile struct {
 	Port            int       `json:"port" db:"port"`
 	TLSEnabled      bool      `json:"tlsEnabled" db:"tls_enabled"`
 	CertificatePath *string   `json:"certificatePath,omitempty" db:"certificate_path"`
+	UseReflection   bool      `json:"useReflection" db:"use_reflection"`
 	CreatedAt       time.Time `json:"createdAt" db:"created_at"`
 	UpdatedAt       time.Time `json:"updatedAt" db:"updated_at"`
 }
@@ -22,12 +23,13 @@ type ServerProfile struct {
 func NewServerProfile(name, host string, port int) *ServerProfile {
 	now := time.Now()
 	return &ServerProfile{
-		ID:        uuid.New().String(),
-		Name:      name,
-		Host:      host,
-		Port:      port,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:            uuid.New().String(),
+		Name:          name,
+		Host:          host,
+		Port:          port,
+		UseReflection: false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 }
 

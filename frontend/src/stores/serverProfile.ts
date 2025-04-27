@@ -42,9 +42,19 @@ export const useServerProfileStore = defineStore('serverProfile', () => {
       profile.host,
       profile.port,
       profile.tlsEnabled,
-      profile.certificatePath || null
+      profile.certificatePath || null,
+      profile.useReflection ?? false
     )
+    // Add proto paths and scan/parse proto files for each protoFolder
+    if (profile.protoFolders && profile.protoFolders.length > 0) {
+      await Promise.all(profile.protoFolders.map(async (folder) => {
+        // Generate a random ID for the proto path
+        const protoPathId = Math.random().toString(36).substring(2, 12);
+        await AppAPI.ScanAndParseProtoPath(created.id, protoPathId, folder);
+      }))
+    }
     profiles.value.push(toFrontendProfile(created))
+    return toFrontendProfile(created)
   }
 
   async function updateProfile(id: string, updates: Partial<ServerProfile>) {
