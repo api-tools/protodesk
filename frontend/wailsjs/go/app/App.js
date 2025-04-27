@@ -50,6 +50,10 @@ export function SaveProtoDefinition(arg1) {
   return window['go']['app']['App']['SaveProtoDefinition'](arg1);
 }
 
+export function SelectProtoFolder() {
+  return window['go']['app']['App']['SelectProtoFolder']();
+}
+
 export function Shutdown(arg1) {
   return window['go']['app']['App']['Shutdown'](arg1);
 }

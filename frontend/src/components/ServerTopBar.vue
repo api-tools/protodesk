@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useServerProfileStore } from '@/stores/serverProfile'
-import { ListProtoDefinitionsByProfile } from '@wailsjs/go/app/App'
+import { ListProtoDefinitionsByProfile, SelectProtoFolder, ImportProtoFilesFromFolder } from '@wailsjs/go/app/App'
 import ConfirmModal from './ConfirmModal.vue'
 
 declare global {
@@ -23,7 +23,8 @@ const modalProfile = ref({
   host: '',
   port: 50051,
   tlsEnabled: false,
-  certificatePath: ''
+  certificatePath: '',
+  useReflection: false
 })
 
 const selectedProfileId = ref<string | null>(null)
@@ -63,21 +64,21 @@ watch(() => showModal.value && selectedProfileId.value, (val) => {
 function openAdd() {
   isEdit.value = false
   showModal.value = true
-  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '' }
+  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false }
   protoFolders.value = []
 }
 
 function openEdit(profile: any) {
   isEdit.value = true
   showModal.value = true
-  modalProfile.value = { ...profile }
+  modalProfile.value = { ...profile, useReflection: profile.useReflection ?? false }
   protoFolders.value = Array.isArray(profile.protoFolders) ? [...profile.protoFolders] : []
 }
 
 async function saveProfile() {
   if (!modalProfile.value.name || !modalProfile.value.host || !modalProfile.value.port) return
   if (isEdit.value) {
-    await profileStore.updateProfile(modalProfile.value.id, { ...modalProfile.value, protoFolders: [...protoFolders.value] })
+    await profileStore.updateProfile(modalProfile.value.id, { ...modalProfile.value, protoFolders: [...protoFolders.value], useReflection: modalProfile.value.useReflection })
   } else {
     const newId = Date.now().toString();
     await profileStore.addProfile({
@@ -85,7 +86,8 @@ async function saveProfile() {
       id: newId,
       createdAt: new Date(),
       updatedAt: new Date(),
-      protoFolders: [...protoFolders.value]
+      protoFolders: [...protoFolders.value],
+      useReflection: modalProfile.value.useReflection
     })
     selectedProfileId.value = newId;
   }
@@ -116,17 +118,33 @@ async function removeProfile() {
 
 // Proto folder management
 const protoFolders = ref<string[]>([])
+const selectedProtoFolder = ref<string | null>(null)
+const showInfoModal = ref(false)
+const infoModalMessage = ref('')
+
 async function addProtoFolder() {
-  let folder = null;
-  if (window.runtime && typeof window.runtime.OpenDirectoryDialog === 'function') {
-    folder = await window.runtime.OpenDirectoryDialog({ title: 'Select a proto folder' });
+  const files = await ImportProtoFilesFromFolder();
+  if (!files || files.length === 0) {
+    infoModalMessage.value = 'No valid .proto files were found in the selected folder.';
+    showInfoModal.value = true;
+    return;
   }
-  if (folder && !protoFolders.value.includes(folder)) {
-    protoFolders.value.push(folder);
+  // Get the folder path from the first file (all files are from the same folder)
+  const folderPath = files[0].filePath.substring(0, files[0].filePath.lastIndexOf('/'));
+  if (!protoFolders.value.includes(folderPath)) {
+    protoFolders.value.push(folderPath);
   }
 }
-function removeProtoFolder(folder: string) {
-  protoFolders.value = protoFolders.value.filter(f => f !== folder)
+
+function selectProtoFolder(folder: string) {
+  selectedProtoFolder.value = folder
+}
+
+function removeSelectedProtoFolder() {
+  if (selectedProtoFolder.value) {
+    protoFolders.value = protoFolders.value.filter(f => f !== selectedProtoFolder.value)
+    selectedProtoFolder.value = null
+  }
 }
 
 // Debug: log profiles whenever they change
@@ -174,37 +192,58 @@ function debugReloadProfiles() {
     </div>
     <!-- Modal -->
     <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div class="bg-white text-[#222] rounded-lg shadow-lg p-6 w-full max-w-md text-[0.8rem]">
+      <div class="bg-white text-[#222] rounded-lg shadow-lg p-6 w-full max-w-3xl text-[0.8rem] relative">
+        <!-- Close (cross) button -->
+        <button class="absolute top-2 right-4 text-xl text-gray-400 hover:text-gray-700 font-bold" @click="showModal = false">&times;</button>
         <h3 class="text-lg font-bold mb-4">{{ isEdit ? 'Edit' : 'Add' }} Server Profile</h3>
-        <form @submit.prevent="saveProfile" class="flex flex-col gap-3">
-          <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="border rounded px-3 py-2" />
-          <input v-model="modalProfile.host" type="text" placeholder="Host" required class="border rounded px-3 py-2" />
-          <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="border rounded px-3 py-2" />
-          <label class="flex items-center gap-2">
-            <input v-model="modalProfile.tlsEnabled" type="checkbox" /> TLS Enabled
-          </label>
-          <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="border rounded px-3 py-2" />
-          <div class="flex gap-2 mt-2">
-            <button type="submit" class="bg-[#42b983] text-[#222] rounded px-4 py-1 font-bold hover:bg-[#369870] transition">Save</button>
-            <button type="button" class="bg-gray-400 text-white rounded px-4 py-1 font-bold hover:bg-gray-600 transition" @click="showModal = false">Cancel</button>
-          </div>
-        </form>
-        <div class="mt-6">
-          <h4 class="font-semibold mb-2">Proto Folders</h4>
-          <div class="flex flex-col gap-2">
-            <div v-for="folder in protoFolders" :key="folder" class="flex items-center justify-between bg-[#29323b] text-[#b0bec5] rounded px-3 py-1">
-              <span class="truncate">{{ folder }}</span>
-              <button class="text-[#b71c1c] underline hover:text-[#7f1d1d] ml-2" @click="removeProtoFolder(folder)">Remove</button>
+        <div class="flex flex-row gap-8">
+          <!-- Left column: Server data fields -->
+          <form @submit.prevent="saveProfile" class="flex flex-col gap-3 flex-1 min-w-0">
+            <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="border rounded px-3 py-2" />
+            <input v-model="modalProfile.host" type="text" placeholder="Host" required class="border rounded px-3 py-2" />
+            <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="border rounded px-3 py-2" />
+            <label class="flex items-center gap-2">
+              <input v-model="modalProfile.tlsEnabled" type="checkbox" /> TLS Enabled
+            </label>
+            <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="border rounded px-3 py-2" />
+            <label class="flex items-center gap-2">
+              <input v-model="modalProfile.useReflection" type="checkbox" /> Use Reflection
+            </label>
+            <hr class="my-2 border-t border-gray-300" />
+            <div class="flex gap-2 mt-2">
+              <button type="submit" class="bg-[#42b983] text-white rounded px-4 py-1 font-bold hover:bg-[#369870] transition">Save</button>
+              <button type="button" class="bg-gray-400 text-white rounded px-4 py-1 font-bold hover:bg-gray-600 transition" @click="showModal = false">Cancel</button>
             </div>
-            <button class="bg-[#42b983] text-[#222] rounded px-3 py-1 font-bold hover:bg-[#369870] transition mt-1 self-start" @click="addProtoFolder">＋ Add Proto Folder</button>
+          </form>
+          <!-- Right column: Proto folders and files -->
+          <div class="flex flex-col flex-1 min-w-0">
+            <h4 class="font-semibold mb-2">Proto Folders</h4>
+            <div class="border rounded bg-white text-[#222] overflow-y-auto mb-2" style="height: 180px;">
+              <div v-for="folder in protoFolders" :key="folder"
+                class="px-3 py-1 cursor-pointer select-none"
+                :class="{ 'bg-[#42b983] text-white': selectedProtoFolder === folder, 'hover:bg-gray-100': selectedProtoFolder !== folder }"
+                @click="!modalProfile.useReflection && selectProtoFolder(folder)"
+                :aria-disabled="modalProfile.useReflection"
+                :tabindex="modalProfile.useReflection ? -1 : 0"
+                :style="modalProfile.useReflection ? 'pointer-events: none; opacity: 0.5;' : ''"
+              >
+                {{ folder }}
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button class="bg-[#42b983] text-white rounded px-3 py-1 font-bold hover:bg-[#369870] transition self-start" @click="addProtoFolder" :disabled="modalProfile.useReflection">Add proto path</button>
+              <button class="bg-red-500 text-white rounded px-3 py-1 font-bold hover:bg-red-700 transition self-start disabled:opacity-50" :disabled="!selectedProtoFolder || modalProfile.useReflection" @click="removeSelectedProtoFolder">Remove path</button>
+            </div>
           </div>
-        </div>
-        <div v-if="isEdit" class="mt-6">
-          <h4 class="font-semibold mb-2">Proto Files</h4>
-          <div v-if="protoDefinitions.length === 0" class="text-gray-500">No proto files for this server.</div>
-          <ul v-else class="list-disc pl-5">
-            <li v-for="file in protoDefinitions" :key="file.id">{{ file.filePath }}</li>
-          </ul>
+          <!-- Info Modal for no proto files found -->
+          <ConfirmModal
+            :show="showInfoModal"
+            title="No Proto Files Found"
+            :message="infoModalMessage"
+            confirmText="OK"
+            :onConfirm="() => { showInfoModal = false }"
+            :onCancel="() => { showInfoModal = false }"
+          />
         </div>
       </div>
     </div>

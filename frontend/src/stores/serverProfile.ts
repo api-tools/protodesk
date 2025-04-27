@@ -13,6 +13,7 @@ export interface ServerProfile {
   createdAt: Date
   updatedAt: Date
   protoFolders?: string[]
+  useReflection?: boolean
 }
 
 function toFrontendProfile(profile: any): ServerProfile {
@@ -21,6 +22,7 @@ function toFrontendProfile(profile: any): ServerProfile {
     createdAt: new Date(profile.createdAt),
     updatedAt: new Date(profile.updatedAt),
     protoFolders: Array.isArray(profile.protoFolders) ? profile.protoFolders : [],
+    useReflection: profile.useReflection ?? false,
   }
 }
 

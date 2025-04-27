@@ -29,6 +29,8 @@ export function ListServerProfiles():Promise<Array<models.ServerProfile>>;
 
 export function SaveProtoDefinition(arg1:proto.ProtoDefinition):Promise<void>;
 
+export function SelectProtoFolder():Promise<string>;
+
 export function Shutdown(arg1:context.Context):Promise<void>;
 
 export function Startup(arg1:context.Context):Promise<void>;

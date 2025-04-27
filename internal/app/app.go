@@ -180,3 +180,17 @@ func (a *App) ImportProtoFilesFromFolder() ([]ProtoFileImport, error) {
 	}
 	return results, nil
 }
+
+// SelectProtoFolder opens a directory dialog and returns the selected folder path
+func (a *App) SelectProtoFolder() (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("context not initialized")
+	}
+	folder, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select a proto folder",
+	})
+	if err != nil {
+		return "", err
+	}
+	return folder, nil
+}
