@@ -3,6 +3,7 @@
 import {models} from '../models';
 import {app} from '../models';
 import {proto} from '../models';
+import {services} from '../models';
 import {context} from '../models';
 
 export function ConnectToServer(arg1:string):Promise<void>;
@@ -12,6 +13,8 @@ export function CreateProtoPath(arg1:string,arg2:string,arg3:string):Promise<voi
 export function CreateServerProfile(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:any,arg6:boolean):Promise<models.ServerProfile>;
 
 export function DeleteProtoDefinition(arg1:string):Promise<void>;
+
+export function DeleteProtoPath(arg1:string):Promise<void>;
 
 export function DeleteServerProfile(arg1:string):Promise<void>;
 
@@ -26,6 +29,8 @@ export function ImportProtoFilesFromFolder():Promise<Array<app.ProtoFileImport>>
 export function IsServerConnected(arg1:string):Promise<boolean>;
 
 export function ListProtoDefinitionsByProfile(arg1:string):Promise<Array<proto.ProtoDefinition>>;
+
+export function ListProtoPathsByServer(arg1:string):Promise<Array<services.ProtoPath>>;
 
 export function ListServerProfiles():Promise<Array<models.ServerProfile>>;
 

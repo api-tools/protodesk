@@ -18,6 +18,10 @@ export function DeleteProtoDefinition(arg1) {
   return window['go']['app']['App']['DeleteProtoDefinition'](arg1);
 }
 
+export function DeleteProtoPath(arg1) {
+  return window['go']['app']['App']['DeleteProtoPath'](arg1);
+}
+
 export function DeleteServerProfile(arg1) {
   return window['go']['app']['App']['DeleteServerProfile'](arg1);
 }
@@ -44,6 +48,10 @@ export function IsServerConnected(arg1) {
 
 export function ListProtoDefinitionsByProfile(arg1) {
   return window['go']['app']['App']['ListProtoDefinitionsByProfile'](arg1);
+}
+
+export function ListProtoPathsByServer(arg1) {
+  return window['go']['app']['App']['ListProtoPathsByServer'](arg1);
 }
 
 export function ListServerProfiles() {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useServerProfileStore } from '@/stores/serverProfile'
-import { ListProtoDefinitionsByProfile, SelectProtoFolder, ImportProtoFilesFromFolder, ScanAndParseProtoPath, CreateProtoPath } from '@wailsjs/go/app/App'
+import { ListProtoDefinitionsByProfile, SelectProtoFolder, ImportProtoFilesFromFolder, ScanAndParseProtoPath, CreateProtoPath, ListProtoPathsByServer, DeleteProtoPath } from '@wailsjs/go/app/App'
 import ConfirmModal from './ConfirmModal.vue'
 
 declare global {
@@ -68,11 +68,24 @@ function openAdd() {
   protoFolders.value = []
 }
 
-function openEdit(profile: any) {
+async function openEdit(profile: any) {
   isEdit.value = true
   showModal.value = true
   modalProfile.value = { ...profile, useReflection: profile.useReflection ?? false }
-  protoFolders.value = Array.isArray(profile.protoFolders) ? [...profile.protoFolders] : []
+  // Load proto paths from backend
+  try {
+    const paths = await ListProtoPathsByServer(profile.id);
+    protoFolders.value = Array.isArray(paths) ? paths.map(p => p.Path) : [];
+    protoPathIdMap.value = {};
+    if (Array.isArray(paths)) {
+      for (const p of paths) {
+        protoPathIdMap.value[`${profile.id}::${p.Path}`] = p.ID;
+      }
+    }
+  } catch (e) {
+    protoFolders.value = [];
+    protoPathIdMap.value = {};
+  }
 }
 
 async function saveProfile() {
@@ -93,19 +106,24 @@ async function saveProfile() {
   }
   // After creating/updating the server, save proto paths and definitions
   for (const folder of protoFolders.value) {
-    const protoPathId = Math.random().toString(36).substring(2, 12);
-    try {
-      await CreateProtoPath(protoPathId, createdProfile.id, folder);
-    } catch (e) {
-      infoModalMessage.value = `Failed to save proto path: ${folder}. Error: ${e}`;
-      showInfoModal.value = true;
-      continue;
-    }
-    try {
-      await ScanAndParseProtoPath(createdProfile.id, protoPathId, folder);
-    } catch (e) {
-      infoModalMessage.value = `Failed to parse proto files in: ${folder}. Error: ${e}`;
-      showInfoModal.value = true;
+    const key = `${createdProfile.id}::${folder}`;
+    // Only create proto path if it is not already in the backend for this server
+    if (!protoPathIdMap.value[key]) {
+      const protoPathId = Math.random().toString(36).substring(2, 12);
+      try {
+        await CreateProtoPath(protoPathId, createdProfile.id, folder);
+        protoPathIdMap.value[key] = protoPathId; // update map so we don't try again in this session
+      } catch (e) {
+        infoModalMessage.value = `Failed to save proto path: ${folder}. Error: ${e}`;
+        showInfoModal.value = true;
+        continue;
+      }
+      try {
+        await ScanAndParseProtoPath(createdProfile.id, protoPathId, folder);
+      } catch (e) {
+        infoModalMessage.value = `Failed to parse proto files in: ${folder}. Error: ${e}`;
+        showInfoModal.value = true;
+      }
     }
   }
   // After adding, clear modal fields and protoFolders
@@ -146,6 +164,8 @@ const selectedProtoFolder = ref<string | null>(null)
 const showInfoModal = ref(false)
 const infoModalMessage = ref('')
 
+const protoPathIdMap = ref<Record<string, string>>({});
+
 async function addProtoFolder() {
   // Check required server fields before opening folder picker
   if (!modalProfile.value.name || !modalProfile.value.host || !modalProfile.value.port) {
@@ -174,8 +194,21 @@ function selectProtoFolder(folder: string) {
   selectedProtoFolder.value = folder
 }
 
-function removeSelectedProtoFolder() {
+async function removeSelectedProtoFolder() {
   if (selectedProtoFolder.value) {
+    const key = `${modalProfile.value.id}::${selectedProtoFolder.value}`;
+    // Remove from backend if it exists
+    const pathId = protoPathIdMap.value[key];
+    if (pathId) {
+      try {
+        await DeleteProtoPath(pathId);
+      } catch (e) {
+        infoModalMessage.value = `Failed to delete proto path: ${selectedProtoFolder.value}. Error: ${e}`;
+        showInfoModal.value = true;
+        return;
+      }
+      delete protoPathIdMap.value[key];
+    }
     protoFolders.value = protoFolders.value.filter(f => f !== selectedProtoFolder.value)
     selectedProtoFolder.value = null
   }

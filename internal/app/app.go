@@ -264,3 +264,19 @@ func (a *App) CreateProtoPath(id, serverProfileId, path string) error {
 	}
 	return a.profileManager.GetStore().CreateProtoPath(context.Background(), protoPath)
 }
+
+// ListProtoPathsByServer lists proto paths for a given server profile
+func (a *App) ListProtoPathsByServer(serverID string) ([]*services.ProtoPath, error) {
+	if a.profileManager == nil {
+		return nil, fmt.Errorf("profile manager not initialized; startup may not have run successfully")
+	}
+	return a.profileManager.GetStore().ListProtoPathsByServer(context.Background(), serverID)
+}
+
+// DeleteProtoPath deletes a proto path by its ID
+func (a *App) DeleteProtoPath(id string) error {
+	if a.profileManager == nil {
+		return fmt.Errorf("profile manager not initialized; startup may not have run successfully")
+	}
+	return a.profileManager.GetStore().DeleteProtoPath(context.Background(), id)
+}
