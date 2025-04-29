@@ -32,7 +32,7 @@ export const useServerProfileStore = defineStore('serverProfile', () => {
 
   async function loadProfiles() {
     const backendProfiles = await AppAPI.ListServerProfiles()
-    profiles.value = backendProfiles.map(toFrontendProfile)
+    profiles.value = (backendProfiles ?? []).map(toFrontendProfile)
     console.log('[DEBUG] Pinia store profiles after load:', profiles.value)
   }
 

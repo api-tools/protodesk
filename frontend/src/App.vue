@@ -8,13 +8,16 @@ const profileStore = useServerProfileStore()
 const profiles = computed(() => profileStore.profiles)
 const selectedProfileId = computed(() => profileStore.activeProfile?.id ?? undefined)
 const connectionStatus = ref<'connected' | 'not_connected' | 'unknown'>('unknown')
+function setConnectionStatus(status: 'connected' | 'not_connected' | 'unknown') {
+  connectionStatus.value = status
+}
 
 // Optionally, you may want to update connectionStatus based on your app logic
 </script>
 
 <template>
   <div id="app" class="app flex flex-col min-h-screen h-screen w-full">
-    <ServerTopBar />
+    <ServerTopBar :set-connection-status="setConnectionStatus" />
     <main class="flex-1 flex flex-col min-h-0">
       <router-view />
     </main>

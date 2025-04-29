@@ -27,31 +27,37 @@ const modalProfile = ref({
   useReflection: false
 })
 
-const selectedProfileId = ref<string | null>(null)
-
-// Watch for changes in active profile
-watch(
-  () => profileStore.activeProfile,
-  (profile) => {
-    selectedProfileId.value = profile?.id || null
-  },
-  { immediate: true }
-)
-
 const showConnectionErrorModal = ref(false)
 const connectionErrorMessage = ref('')
 
 const connectionStatus = ref<'connected' | 'not_connected' | 'unknown'>('unknown')
 const endpoints = ref<any[]>([])
 
+const selectedProfileId = computed({
+  get() {
+    return profileStore.activeProfile?.id || ''
+  },
+  set(id: string) {
+    if (id) {
+      profileStore.setActiveProfile(id)
+    } else {
+      profileStore.setActiveProfile(null)
+    }
+  }
+})
+
+const profileIdToDelete = ref<string | null>(null)
+
+const props = defineProps<{ setConnectionStatus: (status: 'connected' | 'not_connected' | 'unknown') => void }>()
+
 async function selectProfile(id: string) {
   profileStore.setActiveProfile(id)
-  selectedProfileId.value = id
   try {
     await ConnectToServer(id)
     // Check connection status
     const isConnected = await IsServerConnected(id)
     connectionStatus.value = isConnected ? 'connected' : 'not_connected'
+    props.setConnectionStatus(connectionStatus.value)
     // Fetch endpoints (services/methods)
     const defs = await ListProtoDefinitionsByProfile(id)
     endpoints.value = []
@@ -69,6 +75,7 @@ async function selectProfile(id: string) {
     }
   } catch (e) {
     connectionStatus.value = 'not_connected'
+    props.setConnectionStatus('not_connected')
     connectionErrorMessage.value = 'Failed to connect to server: ' + (typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as any).message : JSON.stringify(e)))
     showConnectionErrorModal.value = true
     console.error('Failed to connect to server:', e)
@@ -78,18 +85,18 @@ async function selectProfile(id: string) {
 // Proto file management for modal
 const protoDefinitions = ref<any[]>([])
 async function fetchProtoDefinitions() {
-  if (!selectedProfileId.value) {
+  if (!activeId.value) {
     protoDefinitions.value = []
     return
   }
   try {
-    const defs = await ListProtoDefinitionsByProfile(selectedProfileId.value)
+    const defs = await ListProtoDefinitionsByProfile(activeId.value)
     protoDefinitions.value = defs || []
   } catch (e) {
     protoDefinitions.value = []
   }
 }
-watch(() => showModal.value && selectedProfileId.value, (val) => {
+watch(() => showModal.value && activeId.value, (val) => {
   if (val) fetchProtoDefinitions()
 })
 
@@ -168,27 +175,33 @@ const showConfirm = ref(false)
 const confirmMessage = ref('Are you sure you want to delete this server profile? This action cannot be undone.')
 
 function handleDeleteClick() {
-  showConfirm.value = true
+  if (selectedProfileId.value) {
+    profileIdToDelete.value = selectedProfileId.value
+    showConfirm.value = true
+  }
 }
-function handleConfirmDelete() {
+async function handleConfirmDelete() {
   showConfirm.value = false
-  removeProfile()
+  if (profileIdToDelete.value) {
+    await removeProfile(profileIdToDelete.value)
+    profileIdToDelete.value = null
+  }
 }
 function handleCancelDelete() {
   showConfirm.value = false
+  profileIdToDelete.value = null
 }
 
-async function removeProfile() {
-  if (selectedProfileId.value) {
-    await profileStore.removeProfile(selectedProfileId.value)
-    await profileStore.loadProfiles()
-    selectedProfileId.value = null
-    profileStore.setActiveProfile(null)
-    showModal.value = false
-    // Clear modal fields and protoFolders
-    modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false };
-    protoFolders.value = [];
-  }
+async function removeProfile(id: string) {
+  await profileStore.removeProfile(id)
+  await profileStore.loadProfiles()
+  console.log('Profiles after deletion:', profileStore.profiles)
+  profileStore.setActiveProfile(null)
+  props.setConnectionStatus('unknown')
+  showModal.value = false
+  // Clear modal fields and protoFolders
+  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false };
+  protoFolders.value = [];
 }
 
 // Proto folder management
@@ -266,6 +279,17 @@ function debugReloadProfiles() {
 const isServerDataValid = computed(() => {
   return !!modalProfile.value.name && !!modalProfile.value.host && !!modalProfile.value.port;
 });
+
+// Ensure the select resets if the active profile is not in the list
+watch(
+  () => profileStore.profiles.map(p => p.id),
+  (ids) => {
+    console.log('Watcher: profiles changed:', ids, 'active:', profileStore.activeProfile?.id)
+    if (profileStore.activeProfile && !ids.includes(profileStore.activeProfile.id)) {
+      profileStore.setActiveProfile(null)
+    }
+  }
+)
 </script>
 
 <template>
@@ -290,8 +314,8 @@ const isServerDataValid = computed(() => {
         </span>
       </div>
       <button class="ml-2 bg-[#42b983] text-[#222] rounded px-3 py-1 font-bold hover:bg-[#369870] transition" @click="openAdd">＋ Add Server</button>
-      <button v-if="selectedProfileId" class="text-[#42b983] underline hover:text-[#369870] px-2" @click="openEdit(profiles.find(p => p.id === selectedProfileId))">Edit</button>
-      <button v-if="selectedProfileId" class="text-[#42b983] underline hover:text-[#369870] px-2" @click="handleDeleteClick">Delete</button>
+      <button v-if="profileStore.activeProfile?.id" class="text-[#42b983] underline hover:text-[#369870] px-2" @click="openEdit(profiles.find(p => p.id === profileStore.activeProfile?.id))">Edit</button>
+      <button v-if="profileStore.activeProfile?.id" class="text-[#42b983] underline hover:text-[#369870] px-2" @click="handleDeleteClick">Delete</button>
       <!-- Debug: manual reload button (optional, can remove if not needed) -->
     </div>
     <!-- Modal -->
