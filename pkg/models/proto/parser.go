@@ -1,11 +1,13 @@
 package proto
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -28,10 +30,33 @@ func NewParser(importPaths []string) *Parser {
 
 // ParseFile parses a proto file and returns a ProtoDefinition
 func (p *Parser) ParseFile(filePath string) (*ProtoDefinition, error) {
+	visited := map[string]bool{}
+	return p.parseFileWithVisited(filePath, visited)
+}
+
+// parseFileWithVisited parses a proto file and tracks visited files for circular import detection
+func (p *Parser) parseFileWithVisited(filePath string, visited map[string]bool) (*ProtoDefinition, error) {
+	dependencyGraph := make(map[string][]string)
+	return p.parseFileWithVisitedGraph(filePath, visited, dependencyGraph)
+}
+
+func (p *Parser) parseFileWithVisitedGraph(filePath string, visited map[string]bool, dependencyGraph map[string][]string) (*ProtoDefinition, error) {
+	// Track the import chain for better error messages
+	importChain := make([]string, 0, len(visited)+1)
+	for k := range visited {
+		importChain = append(importChain, k)
+	}
+	importChain = append(importChain, filePath)
+
+	if visited[filePath] {
+		return nil, fmt.Errorf("circular import detected: %s\nFull import chain: %v", filePath, importChain)
+	}
+	visited[filePath] = true
+
 	// Read the file content
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read proto file: %w", err)
+		return nil, fmt.Errorf("failed to read proto file %s: %w", filePath, err)
 	}
 
 	// Create a new ProtoDefinition
@@ -40,14 +65,46 @@ func (p *Parser) ParseFile(filePath string) (*ProtoDefinition, error) {
 	// Parse the proto file
 	fileDesc, err := p.parseProtoFile(filePath, content)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse proto file: %w", err)
+		return nil, fmt.Errorf("failed to parse proto file %s: %w", filePath, err)
 	}
 
 	// Extract imports
 	imports := fileDesc.Imports()
+	var importList []string
 	for i := 0; i < imports.Len(); i++ {
 		imp := imports.Get(i)
-		pd.AddImport(imp.Path())
+		importList = append(importList, imp.Path())
+	}
+	dependencyGraph[filePath] = importList
+	pd.Imports = importList
+	pd.DependencyGraph = dependencyGraph
+
+	// Extract enums
+	enums := fileDesc.Enums()
+	for i := 0; i < enums.Len(); i++ {
+		enum := enums.Get(i)
+		enumType := EnumType{
+			Name:        string(enum.Name()),
+			Description: p.extractComments(enum.ParentFile(), int32(enum.Index())),
+		}
+		for j := 0; j < enum.Values().Len(); j++ {
+			val := enum.Values().Get(j)
+			enumType.Values = append(enumType.Values, EnumValue{
+				Name:        string(val.Name()),
+				Number:      int32(val.Number()),
+				Description: p.extractComments(val.ParentFile(), int32(val.Index())),
+			})
+		}
+		pd.Enums = append(pd.Enums, enumType)
+	}
+
+	// Extract file options
+	if fileDesc.Options() != nil {
+		if bytes, err := json.Marshal(fileDesc.Options()); err == nil {
+			pd.FileOptions = string(bytes)
+		} else {
+			pd.FileOptions = "<error marshaling file options>"
+		}
 	}
 
 	// Extract services
@@ -135,11 +192,25 @@ func (p *Parser) parseProtoFile(filePath string, content []byte) (protoreflect.F
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 
+	// Determine well-known types path (cross-platform)
+	wellKnownTypesPath := os.Getenv("PROTOBUF_WELL_KNOWN_TYPES_PATH")
+	if wellKnownTypesPath == "" {
+		switch runtime.GOOS {
+		case "darwin":
+			wellKnownTypesPath = "/usr/local/include"
+		case "linux":
+			wellKnownTypesPath = "/usr/include"
+		case "windows":
+			wellKnownTypesPath = `C:/Program Files/protoc/include`
+		default:
+			wellKnownTypesPath = "/usr/local/include"
+		}
+	}
+
 	// Prepare protoc command
 	args := []string{
 		"--proto_path=" + tmpDir,
-		// Add the default include path for well-known types (adjust if needed)
-		"--proto_path=/usr/local/include", // <-- Change this if your protoc includes are elsewhere
+		"--proto_path=" + wellKnownTypesPath, // Well-known types include path
 		"--descriptor_set_out=" + filepath.Join(tmpDir, "descriptor.pb"),
 		"--include_imports",
 		tmpFile,

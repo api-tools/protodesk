@@ -115,28 +115,40 @@ function selectProtoFile(id: string) {
   selectedMethod.value = null
 }
 
+// Instead, aggregate all services from all proto definitions for the active profile
+const allServices = computed(() => {
+  const result: { name: string, methods: any[] }[] = []
+  for (const def of protoDefinitions.value) {
+    if (def.services && def.services.length > 0) {
+      for (const svc of def.services) {
+        result.push({
+          name: svc.name,
+          methods: svc.methods || []
+        })
+      }
+    }
+  }
+  return result
+})
+
 onMounted(() => {
   profileStore.loadProfiles()
 })
 </script>
 
 <template>
-  <div class="flex flex-row w-full h-full min-h-0 min-w-0 text-[0.8rem] overflow-hidden">
+  <div class="flex flex-row w-full text-[0.8rem] overflow-hidden" style="height: 100vh; overflow: hidden;">
     <!-- Left column: Service/Method Tree -->
     <section class="flex flex-col flex-[2] min-w-[180px] max-w-[320px] h-full border-r border-[#2c3e50] bg-[#202733] p-6">
       <h2 class="font-bold text-white mb-2">Services & Methods</h2>
-      <div v-if="!selectedProtoFileId" class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2">
-        Select a proto file to view its services and methods.
-      </div>
-      <div v-else-if="services.length === 0" class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2">
-        No proto services found in this proto file.
+      <div v-if="allServices.length === 0" class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2">
+        No proto services found for this server.
       </div>
       <div v-else class="mt-2 space-y-4 overflow-y-auto">
-        <div v-for="service in services" :key="service.name">
+        <div v-for="service in allServices" :key="service.name">
           <div class="font-semibold text-white mb-1">{{ service.name }}</div>
           <div v-for="method in service.methods" :key="method.name"
                class="ml-4 px-2 py-1 rounded cursor-pointer text-[#b0bec5] hover:bg-[#2c3e50] hover:text-white"
-               :class="{ 'bg-[#2c3e50] text-white': selectedService === service.name && selectedMethod === method.name }"
                @click="selectMethod(service.name, method.name)">
             {{ method.name }}
           </div>
@@ -156,3 +168,14 @@ onMounted(() => {
     </section>
   </div>
 </template>
+
+<style scoped>
+.flex-row {
+  min-height: 0;
+  flex: 1 1 0%;
+}
+.app, html, body {
+  height: 100%;
+  min-height: 0;
+}
+</style>

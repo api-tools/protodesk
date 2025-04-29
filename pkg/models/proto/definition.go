@@ -22,6 +22,13 @@ type ProtoDefinition struct {
 	ProtoPathID     string    `json:"protoPathId"`     // Linked proto path ID
 	LastParsed      time.Time `json:"lastParsed"`      // Last parsed timestamp
 	Error           string    `json:"error"`           // Parsing/validation error, if any
+
+	// New fields for enums and file options
+	Enums       []EnumType `json:"enums"`       // List of enums defined in the proto
+	FileOptions string     `json:"fileOptions"` // File-level options as string
+
+	// DependencyGraph is built in-memory during parsing and is not persisted to the DB.
+	DependencyGraph map[string][]string `json:"dependencyGraph,omitempty"`
 }
 
 // Service represents a gRPC service defined in the proto file
@@ -64,6 +71,20 @@ type FieldOption struct {
 	Deprecated    bool           `json:"deprecated"`    // Whether the field is deprecated
 	JSONName      string         `json:"jsonName"`      // Custom JSON name for the field
 	CustomOptions map[string]any `json:"customOptions"` // Custom options defined for the field
+}
+
+// EnumType represents a Protocol Buffer enum type
+type EnumType struct {
+	Name        string      `json:"name"`        // Enum name
+	Values      []EnumValue `json:"values"`      // Enum values
+	Description string      `json:"description"` // Enum description from comments
+}
+
+// EnumValue represents a value in a Protocol Buffer enum
+type EnumValue struct {
+	Name        string `json:"name"`        // Value name
+	Number      int32  `json:"number"`      // Value number
+	Description string `json:"description"` // Value description from comments
 }
 
 // NewProtoDefinition creates a new ProtoDefinition instance

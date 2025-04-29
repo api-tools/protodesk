@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,7 +10,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func wellKnownTypesAvailable() bool {
+	path := os.Getenv("PROTOBUF_WELL_KNOWN_TYPES_PATH")
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func TestParser_ParseFile(t *testing.T) {
+	if !wellKnownTypesAvailable() {
+		t.Skip("Skipping: PROTOBUF_WELL_KNOWN_TYPES_PATH not set or directory does not exist")
+	}
 	// Create a temporary directory for test files
 	tmpDir, err := os.MkdirTemp("", "proto-test-*")
 	require.NoError(t, err)
@@ -160,6 +173,9 @@ message ResponseC { bytes data = 1; }
 }
 
 func TestParser_ParseFile_NestedImports(t *testing.T) {
+	if !wellKnownTypesAvailable() {
+		t.Skip("Skipping: PROTOBUF_WELL_KNOWN_TYPES_PATH not set or directory does not exist")
+	}
 	tmpDir, err := os.MkdirTemp("", "proto-test-nested-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -217,6 +233,9 @@ message Foo { string bar = 1; }
 }
 
 func TestParser_ParseFile_MultipleWellKnownTypes(t *testing.T) {
+	if !wellKnownTypesAvailable() {
+		t.Skip("Skipping: PROTOBUF_WELL_KNOWN_TYPES_PATH not set or directory does not exist")
+	}
 	tmpDir, err := os.MkdirTemp("", "proto-test-wkt-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
@@ -239,4 +258,112 @@ message UsesWKT {
 	require.NotNil(t, result)
 	assert.Contains(t, result.Imports, "google/protobuf/empty.proto")
 	assert.Contains(t, result.Imports, "google/protobuf/timestamp.proto")
+}
+
+func TestParser_CircularImportChain(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "proto-test-circular-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	// Create three proto files forming a circular import: a -> b -> c -> a
+	aProto := `syntax = "proto3"; import "b.proto"; message A {}`
+	bProto := `syntax = "proto3"; import "c.proto"; message B {}`
+	cProto := `syntax = "proto3"; import "a.proto"; message C {}`
+
+	aFile := filepath.Join(tmpDir, "a.proto")
+	bFile := filepath.Join(tmpDir, "b.proto")
+	cFile := filepath.Join(tmpDir, "c.proto")
+
+	require.NoError(t, os.WriteFile(aFile, []byte(aProto), 0644))
+	require.NoError(t, os.WriteFile(bFile, []byte(bProto), 0644))
+	require.NoError(t, os.WriteFile(cFile, []byte(cProto), 0644))
+
+	parser := NewParser([]string{tmpDir})
+	_, err = parser.ParseFile(aFile)
+	assert.Error(t, err)
+	// Check for protoc's recursive import error message
+	assert.Contains(t, err.Error(), "File recursively imports itself")
+}
+
+func TestParser_MalformedFieldType(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "proto-test-malformed-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	malformedProto := `syntax = "proto3"; message Bad { invalidtype foo = 1; }`
+	file := filepath.Join(tmpDir, "bad.proto")
+	require.NoError(t, os.WriteFile(file, []byte(malformedProto), 0644))
+
+	parser := NewParser([]string{tmpDir})
+	_, err = parser.ParseFile(file)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "protoc failed")
+}
+
+func TestParser_LargeProtoFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "proto-test-large-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	// Generate a proto file with 50 services, each with 10 methods
+	services := ""
+	for i := 0; i < 50; i++ {
+		services += fmt.Sprintf("service S%d {\n", i)
+		for j := 0; j < 10; j++ {
+			services += fmt.Sprintf("  rpc M%d (Req) returns (Res) {}\n", j)
+		}
+		services += "}\n"
+	}
+	largeProto := `syntax = "proto3"; message Req { string foo = 1; } message Res { string bar = 1; }` + services
+	file := filepath.Join(tmpDir, "large.proto")
+	require.NoError(t, os.WriteFile(file, []byte(largeProto), 0644))
+
+	parser := NewParser([]string{tmpDir})
+	result, err := parser.ParseFile(file)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.GreaterOrEqual(t, len(result.Services), 40)
+}
+
+func TestParser_ImportFromMultipleLocations(t *testing.T) {
+	tmpDir1, err := os.MkdirTemp("", "proto-test-import1-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir1)
+	tmpDir2, err := os.MkdirTemp("", "proto-test-import2-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir2)
+
+	commonProto := `syntax = "proto3"; message Shared { string foo = 1; }`
+	file1 := filepath.Join(tmpDir1, "shared.proto")
+	file2 := filepath.Join(tmpDir2, "shared.proto")
+	require.NoError(t, os.WriteFile(file1, []byte(commonProto), 0644))
+	require.NoError(t, os.WriteFile(file2, []byte(commonProto), 0644))
+
+	mainProto := `syntax = "proto3"; import "shared.proto"; message Main { Shared s = 1; }`
+	mainFile := filepath.Join(tmpDir1, "main.proto")
+	require.NoError(t, os.WriteFile(mainFile, []byte(mainProto), 0644))
+
+	parser := NewParser([]string{tmpDir1, tmpDir2})
+	result, err := parser.ParseFile(mainFile)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Contains(t, result.Imports, "shared.proto")
+}
+
+func TestParser_EnumExtractionEdgeCase(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "proto-test-enum-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	protoContent := `syntax = "proto3"; enum Foo { FOO_UNSPECIFIED = 0; FOO_BAR = 1; }`
+	file := filepath.Join(tmpDir, "enum.proto")
+	require.NoError(t, os.WriteFile(file, []byte(protoContent), 0644))
+
+	parser := NewParser([]string{tmpDir})
+	result, err := parser.ParseFile(file)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.GreaterOrEqual(t, len(result.Enums), 1)
+	assert.Equal(t, "Foo", result.Enums[0].Name)
+	assert.Equal(t, "FOO_UNSPECIFIED", result.Enums[0].Values[0].Name)
 }

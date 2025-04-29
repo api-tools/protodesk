@@ -167,6 +167,11 @@ func TestSQLiteStore_ProtoDefinitionCRUD(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a proto definition
+	profile := models.NewServerProfile("profile-1", "localhost", 50051)
+	profile.ID = "profile-1"
+	require.NoError(t, store.Create(ctx, profile))
+	protoPath := &ProtoPath{ID: "path1", ServerProfileID: "profile-1", Path: "/tmp"}
+	require.NoError(t, store.CreateProtoPath(ctx, protoPath))
 	def := &proto.ProtoDefinition{
 		ID:              "test-proto",
 		FilePath:        "/tmp/test.proto",
@@ -178,6 +183,7 @@ func TestSQLiteStore_ProtoDefinitionCRUD(t *testing.T) {
 		Description:     "Test proto definition",
 		Version:         "1",
 		ServerProfileID: "profile-1",
+		ProtoPathID:     "path1",
 	}
 
 	// Create
@@ -219,4 +225,114 @@ func TestSQLiteStore_ProtoDefinitionCRUD(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.GetProtoDefinition(ctx, def.ID)
 	assert.Error(t, err)
+}
+
+func TestProtoDefinitionStorage_CRUD_EnumsAndOptions(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create test proto definition with enums and file options
+	profile := models.NewServerProfile("server1", "localhost", 50051)
+	profile.ID = "server1"
+	require.NoError(t, store.Create(ctx, profile))
+	protoPath := &ProtoPath{ID: "path1", ServerProfileID: "server1", Path: "/tmp"}
+	require.NoError(t, store.CreateProtoPath(ctx, protoPath))
+
+	pd := &proto.ProtoDefinition{
+		ID:              "test1.proto",
+		FilePath:        "/tmp/test1.proto",
+		Content:         "syntax = \"proto3\";",
+		Imports:         []string{"google/protobuf/timestamp.proto"},
+		Services:        []proto.Service{{Name: "TestService"}},
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		Description:     "Test proto",
+		Version:         "1",
+		ServerProfileID: "server1",
+		ProtoPathID:     "path1",
+		LastParsed:      time.Now(),
+		Error:           "",
+		Enums: []proto.EnumType{{
+			Name:        "TestEnum",
+			Values:      []proto.EnumValue{{Name: "A", Number: 0}, {Name: "B", Number: 1}},
+			Description: "Enum description",
+		}},
+		FileOptions: `{"java_package":"com.example"}`,
+	}
+
+	// Create
+	require.NoError(t, store.CreateProtoDefinition(ctx, pd))
+
+	// Read
+	got, err := store.GetProtoDefinition(ctx, pd.ID)
+	require.NoError(t, err)
+	require.Equal(t, pd.ID, got.ID)
+	require.Equal(t, pd.FilePath, got.FilePath)
+	require.Equal(t, pd.Enums[0].Name, got.Enums[0].Name)
+	require.Equal(t, pd.FileOptions, got.FileOptions)
+
+	// Update
+	got.Description = "Updated desc"
+	got.Enums = append(got.Enums, proto.EnumType{Name: "AnotherEnum"})
+	require.NoError(t, store.UpdateProtoDefinition(ctx, got))
+	got2, err := store.GetProtoDefinition(ctx, pd.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Updated desc", got2.Description)
+	require.Len(t, got2.Enums, 2)
+
+	// Delete
+	require.NoError(t, store.DeleteProtoDefinition(ctx, pd.ID))
+	_, err = store.GetProtoDefinition(ctx, pd.ID)
+	require.Error(t, err)
+}
+
+func TestListProtoDefinitionsByProtoPath(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	profile := models.NewServerProfile("server1", "localhost", 50051)
+	profile.ID = "server1"
+	require.NoError(t, store.Create(ctx, profile))
+	protoPathA := &ProtoPath{ID: "pathA", ServerProfileID: "server1", Path: "/a"}
+	protoPathB := &ProtoPath{ID: "pathB", ServerProfileID: "server1", Path: "/b"}
+	require.NoError(t, store.CreateProtoPath(ctx, protoPathA))
+	require.NoError(t, store.CreateProtoPath(ctx, protoPathB))
+
+	pd1 := &proto.ProtoDefinition{ID: "a.proto", FilePath: "/a.proto", ProtoPathID: "pathA", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	pd2 := &proto.ProtoDefinition{ID: "b.proto", FilePath: "/b.proto", ProtoPathID: "pathB", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	pd3 := &proto.ProtoDefinition{ID: "c.proto", FilePath: "/c.proto", ProtoPathID: "pathA", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	require.NoError(t, store.CreateProtoDefinition(ctx, pd1))
+	require.NoError(t, store.CreateProtoDefinition(ctx, pd2))
+	require.NoError(t, store.CreateProtoDefinition(ctx, pd3))
+
+	defsA, err := store.ListProtoDefinitionsByProtoPath(ctx, "pathA")
+	require.NoError(t, err)
+	require.Len(t, defsA, 2)
+	defsB, err := store.ListProtoDefinitionsByProtoPath(ctx, "pathB")
+	require.NoError(t, err)
+	require.Len(t, defsB, 1)
+}
+
+func TestCascadeDeleteProtoPath(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create proto path and proto definition
+	profile := models.NewServerProfile("serverX", "localhost", 50051)
+	profile.ID = "serverX"
+	require.NoError(t, store.Create(ctx, profile))
+	protoPath := &ProtoPath{ID: "pathX", ServerProfileID: "serverX", Path: "/foo"}
+	require.NoError(t, store.CreateProtoPath(ctx, protoPath))
+	pd := &proto.ProtoDefinition{ID: "x.proto", FilePath: "/x.proto", ProtoPathID: "pathX", ServerProfileID: "serverX", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	require.NoError(t, store.CreateProtoDefinition(ctx, pd))
+
+	// Delete proto path
+	require.NoError(t, store.DeleteProtoPath(ctx, "pathX"))
+
+	// Proto definition should be deleted
+	_, err := store.GetProtoDefinition(ctx, "x.proto")
+	require.Error(t, err)
 }

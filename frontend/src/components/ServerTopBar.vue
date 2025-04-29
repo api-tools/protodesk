@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useServerProfileStore } from '@/stores/serverProfile'
-import { ListProtoDefinitionsByProfile, SelectProtoFolder, ImportProtoFilesFromFolder, ScanAndParseProtoPath, CreateProtoPath, ListProtoPathsByServer, DeleteProtoPath } from '@wailsjs/go/app/App'
+import { ListProtoDefinitionsByProfile, SelectProtoFolder, ImportProtoFilesFromFolder, ScanAndParseProtoPath, CreateProtoPath, ListProtoPathsByServer, DeleteProtoPath, ConnectToServer, IsServerConnected } from '@wailsjs/go/app/App'
 import ConfirmModal from './ConfirmModal.vue'
 
 declare global {
@@ -38,9 +38,41 @@ watch(
   { immediate: true }
 )
 
-function selectProfile(id: string) {
+const showConnectionErrorModal = ref(false)
+const connectionErrorMessage = ref('')
+
+const connectionStatus = ref<'connected' | 'not_connected' | 'unknown'>('unknown')
+const endpoints = ref<any[]>([])
+
+async function selectProfile(id: string) {
   profileStore.setActiveProfile(id)
   selectedProfileId.value = id
+  try {
+    await ConnectToServer(id)
+    // Check connection status
+    const isConnected = await IsServerConnected(id)
+    connectionStatus.value = isConnected ? 'connected' : 'not_connected'
+    // Fetch endpoints (services/methods)
+    const defs = await ListProtoDefinitionsByProfile(id)
+    endpoints.value = []
+    if (defs && defs.length > 0) {
+      for (const def of defs) {
+        if (def.services && def.services.length > 0) {
+          for (const svc of def.services) {
+            endpoints.value.push({
+              service: svc.name,
+              methods: svc.methods ? svc.methods.map(m => m.name) : []
+            })
+          }
+        }
+      }
+    }
+  } catch (e) {
+    connectionStatus.value = 'not_connected'
+    connectionErrorMessage.value = 'Failed to connect to server: ' + (typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as any).message : JSON.stringify(e)))
+    showConnectionErrorModal.value = true
+    console.error('Failed to connect to server:', e)
+  }
 }
 
 // Proto file management for modal
@@ -149,6 +181,7 @@ function handleCancelDelete() {
 async function removeProfile() {
   if (selectedProfileId.value) {
     await profileStore.removeProfile(selectedProfileId.value)
+    await profileStore.loadProfiles()
     selectedProfileId.value = null
     profileStore.setActiveProfile(null)
     showModal.value = false
@@ -323,6 +356,14 @@ const isServerDataValid = computed(() => {
       cancelText="Cancel"
       :onConfirm="handleConfirmDelete"
       :onCancel="handleCancelDelete"
+    />
+    <ConfirmModal
+      :show="showConnectionErrorModal"
+      title="Connection Error"
+      :message="connectionErrorMessage"
+      confirmText="OK"
+      :onConfirm="() => { showConnectionErrorModal = false }"
+      :onCancel="() => { showConnectionErrorModal = false }"
     />
   </nav>
 </template> 

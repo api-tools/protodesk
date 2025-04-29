@@ -280,3 +280,8 @@ func (a *App) DeleteProtoPath(id string) error {
 	}
 	return a.profileManager.GetStore().DeleteProtoPath(context.Background(), id)
 }
+
+// ConnectServer establishes a connection to the specified server profile
+func (a *App) ConnectServer(ctx context.Context, profileID string) error {
+	return a.profileManager.Connect(ctx, profileID)
+}
