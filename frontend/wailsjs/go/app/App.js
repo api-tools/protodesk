@@ -34,6 +34,10 @@ export function DisconnectFromServer(arg1) {
   return window['go']['app']['App']['DisconnectFromServer'](arg1);
 }
 
+export function GetMethodInputDescriptor(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetMethodInputDescriptor'](arg1, arg2, arg3);
+}
+
 export function GetServerProfile(arg1) {
   return window['go']['app']['App']['GetServerProfile'](arg1);
 }
@@ -60,6 +64,10 @@ export function ListProtoPathsByServer(arg1) {
 
 export function ListServerProfiles() {
   return window['go']['app']['App']['ListServerProfiles']();
+}
+
+export function ListServerServices(arg1) {
+  return window['go']['app']['App']['ListServerServices'](arg1);
 }
 
 export function SaveProtoDefinition(arg1) {

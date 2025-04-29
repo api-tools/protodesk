@@ -127,3 +127,8 @@ func (m *ServerProfileManager) SetGRPCClient(client GRPCClientManager) {
 	defer m.mu.Unlock()
 	m.grpcClient = client
 }
+
+// GetGRPCClient returns the GRPCClientManager
+func (m *ServerProfileManager) GetGRPCClient() GRPCClientManager {
+	return m.grpcClient
+}

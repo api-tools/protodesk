@@ -285,3 +285,27 @@ func (a *App) DeleteProtoPath(id string) error {
 func (a *App) ConnectServer(ctx context.Context, profileID string) error {
 	return a.profileManager.Connect(ctx, profileID)
 }
+
+// ListServerServices returns all services and their methods for a connected server using reflection
+func (a *App) ListServerServices(profileID string) (map[string][]string, error) {
+	if a.profileManager == nil {
+		return nil, fmt.Errorf("profileManager is not initialized")
+	}
+	conn, err := a.profileManager.GetConnection(profileID)
+	if err != nil {
+		return nil, fmt.Errorf("no active connection for profile %s: %w", profileID, err)
+	}
+	return a.profileManager.GetGRPCClient().ListServicesAndMethods(conn)
+}
+
+// GetMethodInputDescriptor returns the input fields for a given service/method using reflection
+func (a *App) GetMethodInputDescriptor(profileID, serviceName, methodName string) ([]services.FieldDescriptor, error) {
+	if a.profileManager == nil {
+		return nil, fmt.Errorf("profileManager is not initialized")
+	}
+	conn, err := a.profileManager.GetConnection(profileID)
+	if err != nil {
+		return nil, fmt.Errorf("no active connection for profile %s: %w", profileID, err)
+	}
+	return a.profileManager.GetGRPCClient().GetMethodInputDescriptor(conn, serviceName, methodName)
+}

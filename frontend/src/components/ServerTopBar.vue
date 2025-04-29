@@ -298,7 +298,7 @@ watch(
       <span class="font-semibold">Server:</span>
       <div class="relative min-w-[160px]">
         <select
-          class="appearance-none bg-gray-800 border border-[#2c3e50] rounded px-3 py-1 text-white focus:outline-none w-full pr-8"
+          class="appearance-none bg-gray-800 border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none w-full pr-8 text-[0.8rem]"
           v-model="selectedProfileId"
           @change="selectedProfileId && selectProfile(selectedProfileId)"
         >
@@ -307,11 +307,6 @@ watch(
             {{ profile.name }}
           </option>
         </select>
-        <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
-          </svg>
-        </span>
       </div>
       <button class="ml-2 bg-[#42b983] text-[#222] rounded px-3 py-1 font-bold hover:bg-[#369870] transition" @click="openAdd">＋ Add Server</button>
       <button v-if="profileStore.activeProfile?.id" class="text-[#42b983] underline hover:text-[#369870] px-2" @click="openEdit(profiles.find(p => p.id === profileStore.activeProfile?.id))">Edit</button>
@@ -327,15 +322,15 @@ watch(
         <div class="flex flex-row gap-8">
           <!-- Left column: Server data fields -->
           <form class="flex flex-col gap-3 flex-1 min-w-0">
-            <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="border rounded px-3 py-2" autocomplete="off" />
-            <input v-model="modalProfile.host" type="text" placeholder="Host" required class="border rounded px-3 py-2" autocomplete="off" />
-            <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="border rounded px-3 py-2" autocomplete="off" />
-            <label class="flex items-center gap-2">
-              <input v-model="modalProfile.tlsEnabled" type="checkbox" /> TLS Enabled
+            <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
+            <input v-model="modalProfile.host" type="text" placeholder="Host" required class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
+            <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
+            <label class="flex items-center gap-2 text-[0.8rem]">
+              <input v-model="modalProfile.tlsEnabled" type="checkbox" class="text-[0.8rem] p-0 m-0" /> TLS Enabled
             </label>
-            <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="border rounded px-3 py-2" autocomplete="off" />
-            <label class="flex items-center gap-2">
-              <input v-model="modalProfile.useReflection" type="checkbox" /> Use Reflection
+            <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
+            <label class="flex items-center gap-2 text-[0.8rem]">
+              <input v-model="modalProfile.useReflection" type="checkbox" class="text-[0.8rem] p-0 m-0" /> Use Reflection
             </label>
           </form>
           <!-- Right column: Proto folders and files -->
