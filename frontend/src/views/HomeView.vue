@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
-import { Greet, ListProtoDefinitionsByProfile, ListServerServices, ConnectToServer, GetMethodInputDescriptor, SavePerRequestHeaders, GetPerRequestHeaders } from '@wailsjs/go/app/App'
+import { Greet, ListProtoDefinitionsByProfile, ListServerServices, ConnectToServer, GetMethodInputDescriptor, SavePerRequestHeaders, GetPerRequestHeaders, CallGRPCMethod } from '@wailsjs/go/app/App'
 import { useServerProfileStore } from '@/stores/serverProfile'
 
 const name = ref('')
@@ -402,11 +402,64 @@ function handleInputChange(field: any, value: any) {
   requestData.value[field.name] = value
 }
 
-function handleSend() {
-  // For now, just echo the requestData and merged headers as a simulated response
-  responseData.value =
-    'Request Data:\n' + JSON.stringify(requestData.value, null, 2) +
-    '\n\nMerged Headers:\n' + JSON.stringify(mergedHeaders.value, null, 2)
+const sendLoading = ref(false)
+const sendError = ref('')
+
+function mergeHeaders(serverHeaders: { key: string, value: string }[], perRequestHeaders: { key: string, value: string }[]) {
+  // Per-request headers override server headers
+  const merged: Record<string, string> = {}
+  for (const h of serverHeaders) {
+    merged[h.key] = h.value
+  }
+  for (const h of perRequestHeaders) {
+    merged[h.key] = h.value
+  }
+  return merged
+}
+
+async function handleSend() {
+  sendLoading.value = true
+  sendError.value = ''
+  responseData.value = null
+  try {
+    if (!activeProfile.value || !selectedService.value || !selectedMethod.value) {
+      sendError.value = 'Missing profile, service, or method.'
+      sendLoading.value = false
+      return
+    }
+    // Validate requestData
+    let requestJSON = ''
+    try {
+      requestJSON = JSON.stringify(requestData.value)
+    } catch (e) {
+      sendError.value = e instanceof Error ? 'Invalid request data: ' + e.message : 'Invalid request data: ' + String(e)
+      sendLoading.value = false
+      return
+    }
+    // Merge headers
+    const merged = mergeHeaders(serverHeaders.value, perRequestHeaders.value)
+    let headersJSON = ''
+    try {
+      headersJSON = JSON.stringify(merged)
+    } catch (e) {
+      sendError.value = e instanceof Error ? 'Invalid headers: ' + e.message : 'Invalid headers: ' + String(e)
+      sendLoading.value = false
+      return
+    }
+    // Call backend
+    const resp = await CallGRPCMethod(
+      activeProfile.value.id,
+      selectedService.value,
+      selectedMethod.value,
+      requestJSON,
+      headersJSON
+    )
+    responseData.value = resp
+  } catch (e) {
+    sendError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    sendLoading.value = false
+  }
 }
 
 function addRepeatedField(fieldName: string) {
@@ -421,6 +474,17 @@ function removeRepeatedField(fieldName: string, idx: number) {
     requestData.value[fieldName].splice(idx, 1)
   }
 }
+
+const formattedResponse = computed(() => {
+  if (!responseData.value) return ''
+  try {
+    // Try to pretty-print JSON
+    return JSON.stringify(JSON.parse(responseData.value), null, 2)
+  } catch {
+    // Fallback to plain text
+    return responseData.value
+  }
+})
 
 onMounted(() => {
   profileStore.loadProfiles()
@@ -603,8 +667,8 @@ onMounted(() => {
         <h2 class="font-bold text-white">Response</h2>
       </div>
       <hr class="border-t border-[#2c3e50] mb-3" />
-      <div class="flex-1 text-[#b0bec5] whitespace-pre-wrap font-mono">
-        <span v-if="responseData">{{ responseData }}</span>
+      <div class="flex-1 text-[#b0bec5] whitespace-pre-wrap font-mono" style="font-size: 0.7rem;">
+        <span v-if="formattedResponse">{{ formattedResponse }}</span>
         <span v-else class="italic">[No response yet]</span>
       </div>
     </section>
