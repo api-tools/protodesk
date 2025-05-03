@@ -6,13 +6,15 @@ import {services} from '../models';
 import {app} from '../models';
 import {proto} from '../models';
 
+export function CallGRPCMethod(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
 export function ConnectServer(arg1:context.Context,arg2:string):Promise<void>;
 
 export function ConnectToServer(arg1:string):Promise<void>;
 
 export function CreateProtoPath(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function CreateServerProfile(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:any,arg6:boolean):Promise<models.ServerProfile>;
+export function CreateServerProfile(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:any,arg6:boolean,arg7:Array<models.Header>):Promise<models.ServerProfile>;
 
 export function DeleteProtoDefinition(arg1:string):Promise<void>;
 
@@ -23,6 +25,8 @@ export function DeleteServerProfile(arg1:string):Promise<void>;
 export function DisconnectFromServer(arg1:string):Promise<void>;
 
 export function GetMethodInputDescriptor(arg1:string,arg2:string,arg3:string):Promise<Array<services.FieldDescriptor>>;
+
+export function GetPerRequestHeaders(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function GetServerProfile(arg1:string):Promise<models.ServerProfile>;
 
@@ -39,6 +43,8 @@ export function ListProtoPathsByServer(arg1:string):Promise<Array<services.Proto
 export function ListServerProfiles():Promise<Array<models.ServerProfile>>;
 
 export function ListServerServices(arg1:string):Promise<Record<string, Array<string>>>;
+
+export function SavePerRequestHeaders(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function SaveProtoDefinition(arg1:proto.ProtoDefinition):Promise<void>;
 

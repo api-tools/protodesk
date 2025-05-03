@@ -6,6 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// Header represents a key-value pair for headers
+type Header struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // ServerProfile represents a gRPC server connection profile
 type ServerProfile struct {
 	ID              string    `json:"id" db:"id"`
@@ -17,6 +23,8 @@ type ServerProfile struct {
 	UseReflection   bool      `json:"useReflection" db:"use_reflection"`
 	CreatedAt       time.Time `json:"createdAt" db:"created_at"`
 	UpdatedAt       time.Time `json:"updatedAt" db:"updated_at"`
+	Headers         []Header  `json:"headers" db:"-"`
+	HeadersJSON     string    `json:"headers_json" db:"headers_json"`
 }
 
 // NewServerProfile creates a new server profile with default values

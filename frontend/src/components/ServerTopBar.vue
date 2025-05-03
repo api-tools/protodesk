@@ -24,8 +24,12 @@ const modalProfile = ref({
   port: 50051,
   tlsEnabled: false,
   certificatePath: '',
-  useReflection: false
+  useReflection: false,
+  headers: [] as { key: string, value: string }[]
 })
+
+const headersJson = ref('[\n  \n]')
+const headersJsonError = ref('')
 
 const showConnectionErrorModal = ref(false)
 const connectionErrorMessage = ref('')
@@ -49,6 +53,9 @@ const selectedProfileId = computed({
 const profileIdToDelete = ref<string | null>(null)
 
 const props = defineProps<{ setConnectionStatus: (status: 'connected' | 'not_connected' | 'unknown') => void }>()
+
+// Add an event emitter for cross-component communication
+const emit = defineEmits(['server-profile-updated'])
 
 async function selectProfile(id: string) {
   profileStore.setActiveProfile(id)
@@ -103,14 +110,14 @@ watch(() => showModal.value && activeId.value, (val) => {
 function openAdd() {
   isEdit.value = false
   showModal.value = true
-  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false }
+  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false, headers: [] }
   protoFolders.value = []
 }
 
 async function openEdit(profile: any) {
   isEdit.value = true
   showModal.value = true
-  modalProfile.value = { ...profile, useReflection: profile.useReflection ?? false }
+  modalProfile.value = { ...profile, useReflection: profile.useReflection ?? false, headers: Array.isArray(profile.headers) ? profile.headers : [] }
   // Load proto paths from backend
   try {
     const paths = await ListProtoPathsByServer(profile.id);
@@ -127,12 +134,80 @@ async function openEdit(profile: any) {
   }
 }
 
+watch(
+  () => showModal.value,
+  (val) => {
+    if (val) {
+      // When opening modal, prefill textarea with new format
+      if (modalProfile.value.headers && modalProfile.value.headers.length > 0) {
+        headersJson.value = JSON.stringify(
+          modalProfile.value.headers.map(h => ({ [h.key]: h.value })),
+          null,
+          2
+        )
+      } else {
+        headersJson.value = '' // Empty by default
+      }
+      headersJsonError.value = ''
+    }
+  }
+)
+
 async function saveProfile() {
-  if (!modalProfile.value.name || !modalProfile.value.host || !modalProfile.value.port) return;
+  // Show error if required fields are missing
+  if (!modalProfile.value.name || !modalProfile.value.host || !modalProfile.value.port) {
+    headersJsonError.value = 'Please fill in all required fields: name, host, and port.'
+    return
+  }
+  // Parse headersJson only if not empty
+  let parsedHeaders: { key: string, value: string }[] = []
+  if (headersJson.value.trim() !== '') {
+    let parsedHeadersRaw: any[] = []
+    try {
+      parsedHeadersRaw = JSON.parse(headersJson.value)
+      if (!Array.isArray(parsedHeadersRaw)) throw new Error('Headers must be a JSON array')
+      for (const obj of parsedHeadersRaw) {
+        if (
+          typeof obj !== 'object' ||
+          obj === null ||
+          Array.isArray(obj)
+        ) {
+          throw new Error('Each header must be an object')
+        }
+        const keys = Object.keys(obj)
+        if (keys.length !== 1) {
+          throw new Error('Each header object must have exactly one key')
+        }
+        const k = keys[0]
+        const v = obj[k]
+        if (typeof k !== 'string' || typeof v !== 'string') {
+          throw new Error('Header name and value must be strings')
+        }
+        parsedHeaders.push({ key: k, value: v })
+      }
+      headersJsonError.value = ''
+    } catch (e: any) {
+      headersJsonError.value = 'Invalid JSON: ' + (e.message || e)
+      return
+    }
+  } else {
+    parsedHeaders = []
+    headersJsonError.value = ''
+  }
+  modalProfile.value.headers = parsedHeaders
   let createdProfile;
   if (isEdit.value) {
-    await profileStore.updateProfile(modalProfile.value.id, { ...modalProfile.value, protoFolders: [...protoFolders.value], useReflection: modalProfile.value.useReflection });
+    await profileStore.updateProfile(modalProfile.value.id, { ...modalProfile.value, protoFolders: [...protoFolders.value], useReflection: modalProfile.value.useReflection, headers: modalProfile.value.headers });
     createdProfile = { id: modalProfile.value.id };
+    // If the edited profile is the active one, reconnect and emit event to refresh methods
+    if (profileStore.activeProfile?.id === modalProfile.value.id) {
+      try {
+        await ConnectToServer(modalProfile.value.id)
+        emit('server-profile-updated', modalProfile.value.id)
+      } catch (e) {
+        console.error('Failed to reconnect after editing server:', e)
+      }
+    }
   } else {
     createdProfile = await profileStore.addProfile({
       ...modalProfile.value,
@@ -140,7 +215,8 @@ async function saveProfile() {
       createdAt: new Date(),
       updatedAt: new Date(),
       protoFolders: [...protoFolders.value],
-      useReflection: modalProfile.value.useReflection
+      useReflection: modalProfile.value.useReflection,
+      headers: modalProfile.value.headers
     });
   }
   // After creating/updating the server, save proto paths and definitions
@@ -166,9 +242,10 @@ async function saveProfile() {
     }
   }
   // After adding, clear modal fields and protoFolders
-  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false };
+  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false, headers: [] };
   protoFolders.value = [];
   showModal.value = false;
+  headersJsonError.value = ''
 }
 
 const showConfirm = ref(false)
@@ -200,7 +277,7 @@ async function removeProfile(id: string) {
   props.setConnectionStatus('unknown')
   showModal.value = false
   // Clear modal fields and protoFolders
-  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false };
+  modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false, headers: [] };
   protoFolders.value = [];
 }
 
@@ -211,6 +288,8 @@ const showInfoModal = ref(false)
 const infoModalMessage = ref('')
 
 const protoPathIdMap = ref<Record<string, string>>({});
+
+const protoPathId = ref('')
 
 async function addProtoFolder() {
   // Check required server fields before opening folder picker
@@ -350,6 +429,18 @@ watch(
               <button class="bg-red-500 text-white rounded px-3 py-1 font-bold hover:bg-red-700 transition self-start disabled:opacity-50" :disabled="!selectedProtoFolder" @click="removeSelectedProtoFolder">Remove path</button>
             </div>
           </div>
+        </div>
+        <div class="mt-6">
+          <label class="font-semibold mb-2 block">Array of headers in JSON format</label>
+          <textarea
+            v-model="headersJson"
+            class="w-full px-2 py-1 rounded border border-[#2c3e50] text-[0.8rem] font-mono"
+            style="height: 120px; resize: none; font-size: 0.8rem; line-height: 1.2;"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder='[\n  { "key": "Authorization", "value": "token" }\n]'
+          ></textarea>
+          <div v-if="headersJsonError" class="text-red-500 text-xs mt-1">{{ headersJsonError }}</div>
         </div>
         <hr class="my-4 border-t border-gray-300 w-full" />
         <div class="flex gap-2 mt-2 justify-start">

@@ -35,6 +35,18 @@ type ServerProfileStore interface {
 
 	// Add new methods
 	ListProtoDefinitionsByProtoPath(ctx context.Context, protoPathID string) ([]*proto.ProtoDefinition, error)
+
+	// Add per-request headers CRUD methods
+	UpsertPerRequestHeaders(ctx context.Context, h *models.PerRequestHeaders) error
+	GetPerRequestHeaders(ctx context.Context, serverProfileID, serviceName, methodName string) (*models.PerRequestHeaders, error)
+	DeletePerRequestHeaders(ctx context.Context, serverProfileID, serviceName, methodName string) error
+}
+
+// ProtoPath represents a proto folder path linked to a server
+type ProtoPath struct {
+	ID              string
+	ServerProfileID string
+	Path            string
 }
 
 // SQLiteStore implements ServerProfileStore using SQLite
@@ -71,7 +83,8 @@ func initializeSchema(db *sqlx.DB) error {
 		certificate_path TEXT,
 		use_reflection BOOLEAN DEFAULT FALSE,
 		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		updated_at DATETIME NOT NULL,
+		headers_json TEXT DEFAULT '[]'
 	);
 	CREATE INDEX IF NOT EXISTS idx_server_profiles_name ON server_profiles(name);
 
@@ -106,6 +119,18 @@ func initializeSchema(db *sqlx.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_proto_definitions_profile ON proto_definitions(server_profile_id);
 	CREATE INDEX IF NOT EXISTS idx_proto_definitions_path ON proto_definitions(proto_path_id);
+
+	CREATE TABLE IF NOT EXISTS per_request_headers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		server_profile_id TEXT NOT NULL,
+		service_name TEXT NOT NULL,
+		method_name TEXT NOT NULL,
+		headers_json TEXT NOT NULL DEFAULT '[]',
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(server_profile_id, service_name, method_name),
+		FOREIGN KEY(server_profile_id) REFERENCES server_profiles(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_per_request_headers_profile ON per_request_headers(server_profile_id);
 	`
 	_, err := db.Exec(schema)
 	return err
@@ -116,12 +141,19 @@ func (s *SQLiteStore) Create(ctx context.Context, profile *models.ServerProfile)
 		return err
 	}
 
+	// Marshal headers to JSON
+	data, err := json.Marshal(profile.Headers)
+	if err != nil {
+		return err
+	}
+	profile.HeadersJSON = string(data)
+
 	query := `
 		INSERT INTO server_profiles (
-			id, name, host, port, tls_enabled, certificate_path, use_reflection, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, name, host, port, tls_enabled, certificate_path, use_reflection, created_at, updated_at, headers_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err := s.db.ExecContext(ctx, query,
+	_, err = s.db.ExecContext(ctx, query,
 		profile.ID,
 		profile.Name,
 		profile.Host,
@@ -131,6 +163,7 @@ func (s *SQLiteStore) Create(ctx context.Context, profile *models.ServerProfile)
 		profile.UseReflection,
 		profile.CreatedAt,
 		profile.UpdatedAt,
+		profile.HeadersJSON,
 	)
 	return err
 }
@@ -142,6 +175,10 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*models.ServerProfile
 	if err != nil {
 		return nil, models.ErrProfileNotFound
 	}
+	// Unmarshal headers_json into Headers
+	if profile.HeadersJSON != "" {
+		_ = json.Unmarshal([]byte(profile.HeadersJSON), &profile.Headers)
+	}
 	return &profile, nil
 }
 
@@ -152,6 +189,12 @@ func (s *SQLiteStore) List(ctx context.Context) ([]*models.ServerProfile, error)
 	if err != nil {
 		return nil, err
 	}
+	// Unmarshal headers_json into Headers for each profile
+	for _, profile := range profiles {
+		if profile.HeadersJSON != "" {
+			_ = json.Unmarshal([]byte(profile.HeadersJSON), &profile.Headers)
+		}
+	}
 	return profiles, nil
 }
 
@@ -159,6 +202,13 @@ func (s *SQLiteStore) Update(ctx context.Context, profile *models.ServerProfile)
 	if err := profile.Validate(); err != nil {
 		return err
 	}
+
+	// Marshal headers to JSON
+	data, err := json.Marshal(profile.Headers)
+	if err != nil {
+		return err
+	}
+	profile.HeadersJSON = string(data)
 
 	query := `
 		UPDATE server_profiles SET
@@ -168,7 +218,8 @@ func (s *SQLiteStore) Update(ctx context.Context, profile *models.ServerProfile)
 			tls_enabled = ?,
 			certificate_path = ?,
 			use_reflection = ?,
-			updated_at = ?
+			updated_at = ?,
+			headers_json = ?
 		WHERE id = ?
 	`
 	result, err := s.db.ExecContext(ctx, query,
@@ -179,6 +230,7 @@ func (s *SQLiteStore) Update(ctx context.Context, profile *models.ServerProfile)
 		profile.CertificatePath,
 		profile.UseReflection,
 		profile.UpdatedAt,
+		profile.HeadersJSON,
 		profile.ID,
 	)
 	if err != nil {
@@ -543,13 +595,6 @@ func (s *SQLiteStore) ListProtoDefinitionsByProtoPath(ctx context.Context, proto
 	return defs, nil
 }
 
-// ProtoPath represents a proto folder path linked to a server
-type ProtoPath struct {
-	ID              string
-	ServerProfileID string
-	Path            string
-}
-
 func (s *SQLiteStore) CreateProtoPath(ctx context.Context, path *ProtoPath) error {
 	query := `INSERT INTO proto_paths (id, server_profile_id, path) VALUES (?, ?, ?)`
 	_, err := s.db.ExecContext(ctx, query, path.ID, path.ServerProfileID, path.Path)
@@ -581,5 +626,42 @@ func (s *SQLiteStore) ListProtoPathsByServer(ctx context.Context, serverID strin
 func (s *SQLiteStore) DeleteProtoPath(ctx context.Context, id string) error {
 	query := `DELETE FROM proto_paths WHERE id = ?`
 	_, err := s.db.ExecContext(ctx, query, id)
+	return err
+}
+
+// Upsert per-request headers
+func (s *SQLiteStore) UpsertPerRequestHeaders(ctx context.Context, h *models.PerRequestHeaders) error {
+	query := `
+	INSERT INTO per_request_headers (server_profile_id, service_name, method_name, headers_json, updated_at)
+	VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+	ON CONFLICT(server_profile_id, service_name, method_name)
+	DO UPDATE SET headers_json=excluded.headers_json, updated_at=CURRENT_TIMESTAMP
+	`
+	_, err := s.db.ExecContext(ctx, query, h.ServerProfileID, h.ServiceName, h.MethodName, h.HeadersJSON)
+	return err
+}
+
+// Get per-request headers for a method
+func (s *SQLiteStore) GetPerRequestHeaders(ctx context.Context, serverProfileID, serviceName, methodName string) (*models.PerRequestHeaders, error) {
+	var h models.PerRequestHeaders
+	query := `
+	SELECT * FROM per_request_headers
+	WHERE server_profile_id = ? AND service_name = ? AND method_name = ?
+	LIMIT 1
+	`
+	err := s.db.GetContext(ctx, &h, query, serverProfileID, serviceName, methodName)
+	if err != nil {
+		return nil, err
+	}
+	return &h, nil
+}
+
+// Delete per-request headers for a method
+func (s *SQLiteStore) DeletePerRequestHeaders(ctx context.Context, serverProfileID, serviceName, methodName string) error {
+	query := `
+	DELETE FROM per_request_headers
+	WHERE server_profile_id = ? AND service_name = ? AND method_name = ?
+	`
+	_, err := s.db.ExecContext(ctx, query, serverProfileID, serviceName, methodName)
 	return err
 }

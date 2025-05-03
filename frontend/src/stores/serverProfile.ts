@@ -14,6 +14,7 @@ export interface ServerProfile {
   updatedAt: Date
   protoFolders?: string[]
   useReflection?: boolean
+  headers?: { key: string, value: string }[]
 }
 
 function toFrontendProfile(profile: any): ServerProfile {
@@ -23,6 +24,7 @@ function toFrontendProfile(profile: any): ServerProfile {
     updatedAt: new Date(profile.updatedAt),
     protoFolders: Array.isArray(profile.protoFolders) ? profile.protoFolders : [],
     useReflection: profile.useReflection ?? false,
+    headers: Array.isArray(profile.headers) ? profile.headers : []
   }
 }
 
@@ -43,7 +45,8 @@ export const useServerProfileStore = defineStore('serverProfile', () => {
       profile.port,
       profile.tlsEnabled,
       profile.certificatePath || null,
-      profile.useReflection ?? false
+      profile.useReflection ?? false,
+      profile.headers ?? []
     )
     // Add proto paths and scan/parse proto files for each protoFolder
     if (profile.protoFolders && profile.protoFolders.length > 0) {

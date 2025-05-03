@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +13,11 @@ import (
 	"protodesk/pkg/services"
 
 	"github.com/google/uuid"
+	"github.com/jhump/protoreflect/dynamic"
+	"github.com/jhump/protoreflect/grpcreflect"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"google.golang.org/grpc/metadata"
+	reflectpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 )
 
 // App struct represents the main application
@@ -59,7 +64,7 @@ func (a *App) Startup(ctx context.Context) error {
 }
 
 // CreateServerProfile creates a new server profile
-func (a *App) CreateServerProfile(name string, host string, port int, enableTLS bool, certPath *string, useReflection bool) (*models.ServerProfile, error) {
+func (a *App) CreateServerProfile(name string, host string, port int, enableTLS bool, certPath *string, useReflection bool, headers []models.Header) (*models.ServerProfile, error) {
 	if a.profileManager == nil {
 		return nil, fmt.Errorf("profileManager is not initialized (did Startup run successfully?)")
 	}
@@ -67,6 +72,7 @@ func (a *App) CreateServerProfile(name string, host string, port int, enableTLS 
 	profile.TLSEnabled = enableTLS
 	profile.CertificatePath = certPath
 	profile.UseReflection = useReflection
+	profile.Headers = headers
 
 	if err := profile.Validate(); err != nil {
 		return nil, err
@@ -308,4 +314,88 @@ func (a *App) GetMethodInputDescriptor(profileID, serviceName, methodName string
 		return nil, fmt.Errorf("no active connection for profile %s: %w", profileID, err)
 	}
 	return a.profileManager.GetGRPCClient().GetMethodInputDescriptor(conn, serviceName, methodName)
+}
+
+// SavePerRequestHeaders saves or updates per-request headers for a method
+func (a *App) SavePerRequestHeaders(serverProfileID, serviceName, methodName, headersJSON string) error {
+	h := &models.PerRequestHeaders{
+		ServerProfileID: serverProfileID,
+		ServiceName:     serviceName,
+		MethodName:      methodName,
+		HeadersJSON:     headersJSON,
+	}
+	return a.profileManager.GetStore().UpsertPerRequestHeaders(a.ctx, h)
+}
+
+// GetPerRequestHeaders retrieves per-request headers for a method
+func (a *App) GetPerRequestHeaders(serverProfileID, serviceName, methodName string) (string, error) {
+	h, err := a.profileManager.GetStore().GetPerRequestHeaders(a.ctx, serverProfileID, serviceName, methodName)
+	if err != nil {
+		return "", err
+	}
+	return h.HeadersJSON, nil
+}
+
+// CallGRPCMethod calls a gRPC method and returns the response as JSON
+func (a *App) CallGRPCMethod(
+	profileID string,
+	serviceName string,
+	methodName string,
+	requestJSON string,
+	headersJSON string,
+) (string, error) {
+	// 1. Get connection
+	conn, err := a.profileManager.GetConnection(profileID)
+	if err != nil {
+		return "", fmt.Errorf("no active connection for profile %s: %w", profileID, err)
+	}
+
+	// 2. Set up reflection client
+	ctx := context.Background()
+	rc := grpcreflect.NewClient(ctx, reflectpb.NewServerReflectionClient(conn))
+	defer rc.Reset()
+
+	svcDesc, err := rc.ResolveService(serviceName)
+	if err != nil {
+		return "", fmt.Errorf("service not found: %w", err)
+	}
+	mDesc := svcDesc.FindMethodByName(methodName)
+	if mDesc == nil {
+		return "", fmt.Errorf("method not found: %s", methodName)
+	}
+
+	// 3. Build request message dynamically
+	inputType := mDesc.GetInputType()
+	reqMsg := dynamic.NewMessage(inputType)
+	if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
+		return "", fmt.Errorf("failed to unmarshal request: %w", err)
+	}
+
+	// 4. Set up headers
+	md := metadata.New(nil)
+	if headersJSON != "" {
+		var headers map[string]string
+		if err := json.Unmarshal([]byte(headersJSON), &headers); err == nil {
+			for k, v := range headers {
+				md.Append(k, v)
+			}
+		}
+	}
+	ctx = metadata.NewOutgoingContext(ctx, md)
+
+	// 5. Invoke the method
+	outType := mDesc.GetOutputType()
+	respMsg := dynamic.NewMessage(outType)
+	methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+	err = conn.Invoke(ctx, methodFullName, reqMsg, respMsg)
+	if err != nil {
+		return "", fmt.Errorf("gRPC call failed: %w", err)
+	}
+
+	// 6. Marshal response to JSON
+	respJSON, err := respMsg.MarshalJSON()
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+	return string(respJSON), nil
 }

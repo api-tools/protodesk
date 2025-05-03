@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
-import { Greet, ListProtoDefinitionsByProfile, ListServerServices, ConnectToServer, GetMethodInputDescriptor } from '@wailsjs/go/app/App'
+import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
+import { Greet, ListProtoDefinitionsByProfile, ListServerServices, ConnectToServer, GetMethodInputDescriptor, SavePerRequestHeaders, GetPerRequestHeaders } from '@wailsjs/go/app/App'
 import { useServerProfileStore } from '@/stores/serverProfile'
 
 const name = ref('')
@@ -96,7 +96,158 @@ const connectionError = ref<string | null>(null)
 
 const reflectionInputFields = ref<any[]>([])
 const inputFieldsLoading = ref(false)
+let isUnmounted = false;
+onUnmounted(() => {
+  isUnmounted = true;
+});
 const inputFieldsError = ref<string | null>(null)
+
+const perRequestHeadersJson = ref('')
+const perRequestHeaders = ref<{ key: string, value: string }[]>([])
+const perRequestHeadersError = ref('')
+const showHeadersModal = ref(false)
+
+// Helper: get server headers from active profile
+const serverHeaders = computed(() => {
+  return (activeProfile.value && Array.isArray(activeProfile.value.headers)) ? activeProfile.value.headers : []
+})
+
+function openHeadersModal() {
+  // Prefill with last used per-request headers, or server headers if empty
+  if (perRequestHeaders.value.length > 0) {
+    perRequestHeadersJson.value = JSON.stringify(
+      perRequestHeaders.value.map(h => ({ [h.key]: h.value })),
+      null,
+      2
+    )
+  } else if (serverHeaders.value.length > 0) {
+    perRequestHeadersJson.value = JSON.stringify(
+      serverHeaders.value.map(h => ({ [h.key]: h.value })),
+      null,
+      2
+    )
+  } else {
+    perRequestHeadersJson.value = ''
+  }
+  perRequestHeadersError.value = ''
+  showHeadersModal.value = true
+}
+
+// When a method is selected, load per-request headers from backend
+async function loadHeadersForMethod() {
+  if (!activeProfile.value || !selectedService.value || !selectedMethod.value) {
+    perRequestHeaders.value = []
+    perRequestHeadersJson.value = ''
+    return
+  }
+  try {
+    const json = await GetPerRequestHeaders(
+      activeProfile.value.id,
+      selectedService.value,
+      selectedMethod.value
+    )
+    if (json && json.trim() !== '') {
+      perRequestHeadersJson.value = json
+      // Parse and set perRequestHeaders.value
+      const arr = JSON.parse(json)
+      perRequestHeaders.value = arr.map((obj: Record<string, string>) => {
+        const k = Object.keys(obj)[0]
+        return { key: k, value: obj[k] }
+      })
+    } else {
+      // Fallback to server headers
+      perRequestHeaders.value = []
+      perRequestHeadersJson.value = JSON.stringify(
+        serverHeaders.value.map(h => ({ [h.key]: h.value })),
+        null,
+        2
+      )
+    }
+  } catch (e) {
+    // Not found: fallback to server headers
+    perRequestHeaders.value = []
+    perRequestHeadersJson.value = JSON.stringify(
+      serverHeaders.value.map(h => ({ [h.key]: h.value })),
+      null,
+      2
+    )
+  }
+}
+
+// Watch for method selection to load headers
+watch([selectedService, selectedMethod, activeProfile], async ([svc, mth, profile]) => {
+  if (svc && mth && profile) {
+    await loadHeadersForMethod()
+  }
+})
+
+async function savePerRequestHeaders() {
+  // Validate JSON
+  if (perRequestHeadersJson.value.trim() === '') {
+    perRequestHeaders.value = []
+    perRequestHeadersError.value = ''
+    showHeadersModal.value = false
+    // Save empty to backend (delete per-request headers)
+    if (activeProfile.value && selectedService.value && selectedMethod.value) {
+      await SavePerRequestHeaders(
+        activeProfile.value.id,
+        selectedService.value,
+        selectedMethod.value,
+        ''
+      )
+    }
+    return
+  }
+  let parsed: { key: string, value: string }[] = []
+  try {
+    const arr = JSON.parse(perRequestHeadersJson.value)
+    if (!Array.isArray(arr)) throw new Error('Headers must be a JSON array')
+    for (const obj of arr) {
+      if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) throw new Error('Each header must be an object')
+      const keys = Object.keys(obj)
+      if (keys.length !== 1) throw new Error('Each header object must have exactly one key')
+      const k = keys[0]
+      const v = obj[k]
+      if (typeof k !== 'string' || typeof v !== 'string') throw new Error('Header name and value must be strings')
+      parsed.push({ key: k, value: v })
+    }
+    perRequestHeaders.value = parsed
+    perRequestHeadersError.value = ''
+    showHeadersModal.value = false
+    // Save to backend
+    if (activeProfile.value && selectedService.value && selectedMethod.value) {
+      await SavePerRequestHeaders(
+        activeProfile.value.id,
+        selectedService.value,
+        selectedMethod.value,
+        perRequestHeadersJson.value
+      )
+    }
+  } catch (e: any) {
+    perRequestHeadersError.value = 'Invalid JSON: ' + (e.message || e)
+  }
+}
+
+function resetHeadersToServerDefault() {
+  if (serverHeaders.value.length > 0) {
+    perRequestHeadersJson.value = JSON.stringify(
+      serverHeaders.value.map(h => ({ [h.key]: h.value })),
+      null,
+      2
+    )
+  } else {
+    perRequestHeadersJson.value = ''
+  }
+  perRequestHeadersError.value = ''
+}
+
+// Use only per-request headers if present, otherwise server headers
+const mergedHeaders = computed(() => {
+  if (perRequestHeaders.value.length > 0) {
+    return perRequestHeaders.value
+  }
+  return serverHeaders.value
+})
 
 async function fetchProtoDefinitions() {
   if (!activeProfile.value) {
@@ -196,15 +347,16 @@ const requestData = ref<Record<string, any>>({})
 const responseData = ref<any>(null)
 
 watch([selectedService, selectedMethod, activeProfile, reflectionServices], async ([svc, mth, profile, refl]) => {
-  if (!inputFieldsLoading) return; // Defensive: should always be defined, but just in case
+  if (!inputFieldsLoading || typeof inputFieldsLoading.value === 'undefined' || isUnmounted) return;
 
   if (profile && profile.useReflection && svc && mth && reflectionServices.value) {
-    inputFieldsLoading.value = true;
+    if (!isUnmounted && inputFieldsLoading && typeof inputFieldsLoading.value !== 'undefined') inputFieldsLoading.value = true;
     inputFieldsError.value = null;
     try {
-      const fields = await GetMethodInputDescriptor(profile.id, svc, mth);
-      reflectionInputFields.value = fields || [];
-      inputFieldsLoading.value = false;
+      let fields = await GetMethodInputDescriptor(profile.id, svc, mth);
+      if (!Array.isArray(fields)) fields = [];
+      reflectionInputFields.value = fields;
+      if (!isUnmounted && inputFieldsLoading && typeof inputFieldsLoading.value !== 'undefined') inputFieldsLoading.value = false;
       // Initialize requestData
       const data: Record<string, any> = {};
       for (const field of fields) {
@@ -213,7 +365,7 @@ watch([selectedService, selectedMethod, activeProfile, reflectionServices], asyn
       requestData.value = data;
     } catch (e: any) {
       reflectionInputFields.value = [];
-      inputFieldsLoading.value = false;
+      if (!isUnmounted && inputFieldsLoading && typeof inputFieldsLoading.value !== 'undefined') inputFieldsLoading.value = false;
       inputFieldsError.value = e?.message || 'Failed to fetch input fields.';
       requestData.value = {};
     }
@@ -229,16 +381,19 @@ watch([selectedService, selectedMethod, activeProfile, reflectionServices], asyn
         data[field.name] = field.isRepeated ? [] : ''
       }
       requestData.value = data
+      reflectionInputFields.value = []
+      if (!isUnmounted && inputFieldsLoading && typeof inputFieldsLoading.value !== 'undefined') inputFieldsLoading.value = false
+      inputFieldsError.value = null
     } else {
       requestData.value = {}
+      reflectionInputFields.value = []
+      if (!isUnmounted && inputFieldsLoading && typeof inputFieldsLoading.value !== 'undefined') inputFieldsLoading.value = false
+      inputFieldsError.value = null
     }
-    reflectionInputFields.value = []
-    inputFieldsLoading.value = false
-    inputFieldsError.value = null
   } else {
     requestData.value = {}
     reflectionInputFields.value = []
-    inputFieldsLoading.value = false
+    if (!isUnmounted && inputFieldsLoading && typeof inputFieldsLoading.value !== 'undefined') inputFieldsLoading.value = false
     inputFieldsError.value = null
   }
 }, { immediate: true })
@@ -248,8 +403,10 @@ function handleInputChange(field: any, value: any) {
 }
 
 function handleSend() {
-  // For now, just echo the requestData as a simulated response
-  responseData.value = JSON.stringify(requestData.value, null, 2)
+  // For now, just echo the requestData and merged headers as a simulated response
+  responseData.value =
+    'Request Data:\n' + JSON.stringify(requestData.value, null, 2) +
+    '\n\nMerged Headers:\n' + JSON.stringify(mergedHeaders.value, null, 2)
 }
 
 function addRepeatedField(fieldName: string) {
@@ -307,11 +464,18 @@ onMounted(() => {
     <section class="flex flex-col flex-[3] h-full border-r border-[#2c3e50] bg-[#232b36] p-3">
       <div class="flex items-center justify-between mb-2">
         <h2 class="font-bold text-white">Request Builder</h2>
-        <button v-if="selectedService && selectedMethod" class="px-3 py-1 bg-[#42b983] text-[#222] rounded font-bold hover:bg-[#369870] transition ml-4" @click="handleSend">Send</button>
+        <div class="flex items-center gap-2">
+          <button v-if="selectedService && selectedMethod" class="px-3 py-1 bg-[#42b983] text-[#222] rounded font-bold hover:bg-[#369870] transition ml-4" @click="handleSend">Send</button>
+          <button v-if="selectedService && selectedMethod" class="text-[#42b983] underline hover:text-[#369870] text-xs ml-2" @click="openHeadersModal">Edit Headers</button>
+        </div>
       </div>
       <hr class="border-t border-[#2c3e50] mb-3" />
       <div v-if="inputFieldsLoading" class="bg-blue-900 text-blue-200 rounded p-2 mb-2">Loading request fields...</div>
       <div v-if="inputFieldsError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ inputFieldsError }}</div>
+      <div v-if="mergedHeaders.length > 0" class="mb-2 text-[#b0bec5] text-xs">
+        <span class="font-semibold">Merged Headers:</span>
+        <span class="ml-2">{{ mergedHeaders.map(h => h.key + ': ' + h.value).join(', ') }}</span>
+      </div>
       <form v-if="selectedService && selectedMethod && ((reflectionInputFields.length > 0 && reflectionInputFields.some(f => !f.isRepeated || (f.isRepeated && requestData[f.name] && requestData[f.name].length > 0))) || allServices.find(svc => svc.name === selectedService)?.methods.find(m => m.name === selectedMethod)?.inputType?.fields?.length)" @submit.prevent>
         <div v-for="field in (reflectionInputFields.length > 0 ? reflectionInputFields : allServices.find(svc => svc.name === selectedService)?.methods.find(m => m.name === selectedMethod)?.inputType.fields || [])" :key="field.name" class="mb-3">
           <div class="flex items-center justify-between mb-1">
@@ -407,8 +571,30 @@ onMounted(() => {
           </template>
         </div>
       </form>
-      <div v-else-if="selectedService && selectedMethod && !inputFieldsLoading && !inputFieldsError" class="text-[#b0bec5] mt-2">
-        This method does not require any input.
+      <div v-else-if="selectedService && selectedMethod && !inputFieldsLoading && !inputFieldsError && ((reflectionInputFields.length === 0 && (!allServices.find(svc => svc.name === selectedService)?.methods.find(m => m.name === selectedMethod)?.inputType?.fields?.length)))" class="text-[#b0bec5] mt-2">
+        This method does not require any input fields.
+      </div>
+      <!-- Per-request headers modal -->
+      <div v-if="showHeadersModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+        <div class="bg-white text-[#222] rounded-lg shadow-lg p-6 w-full max-w-lg text-[0.8rem] relative">
+          <button class="absolute top-2 right-4 text-xl text-gray-400 hover:text-gray-700 font-bold" @click="showHeadersModal = false">&times;</button>
+          <h3 class="text-lg font-bold mb-4">Edit Per-Request Headers</h3>
+          <label class="font-semibold mb-2 block">Array of headers in JSON format</label>
+          <textarea
+            v-model="perRequestHeadersJson"
+            class="w-full px-2 py-1 rounded border border-[#2c3e50] text-[0.8rem] font-mono"
+            style="height: 120px; resize: none; font-size: 0.8rem; line-height: 1.2;"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder='[\n  { "Authorization": "token" }\n]'
+          ></textarea>
+          <div v-if="perRequestHeadersError" class="text-red-500 text-xs mt-1">{{ perRequestHeadersError }}</div>
+          <div class="flex gap-2 mt-4">
+            <button class="bg-[#42b983] text-white rounded px-3 py-1 font-bold hover:bg-[#369870] transition" @click="savePerRequestHeaders">Save</button>
+            <button class="bg-gray-200 text-[#222] rounded px-3 py-1 font-bold hover:bg-gray-300 transition" @click="resetHeadersToServerDefault">Reset to server's default</button>
+            <button class="bg-gray-200 text-[#222] rounded px-3 py-1 font-bold hover:bg-gray-300 transition" @click="showHeadersModal = false">Cancel</button>
+          </div>
+        </div>
       </div>
     </section>
     <!-- Right column: Response Viewer -->
