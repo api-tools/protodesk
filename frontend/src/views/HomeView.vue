@@ -376,7 +376,11 @@ watch([selectedService, selectedMethod, activeProfile, reflectionServices], asyn
       // Initialize requestData
       const data: Record<string, any> = {};
       for (const field of fields) {
-        data[field.name] = field.isRepeated ? [] : '';
+        if (field.type === 'bool') {
+          data[field.name] = false;
+        } else {
+          data[field.name] = field.isRepeated ? [] : '';
+        }
       }
       requestData.value = data;
     } catch (e: any) {
@@ -394,7 +398,11 @@ watch([selectedService, selectedMethod, activeProfile, reflectionServices], asyn
       const fields = method.inputType.fields
       const data: Record<string, any> = {}
       for (const field of fields) {
-        data[field.name] = field.isRepeated ? [] : ''
+        if (field.type === 'bool') {
+          data[field.name] = false;
+        } else {
+          data[field.name] = field.isRepeated ? [] : ''
+        }
       }
       requestData.value = data
       reflectionInputFields.value = []
@@ -652,10 +660,10 @@ onMounted(() => {
             >
               <option v-for="ev in field.enumValues" :key="ev" :value="ev">{{ ev }}</option>
             </select>
-            <label v-else-if="field.type === 'bool'" :key="field.name" class="flex items-center gap-2 text-[0.8rem]">
-              <input type="checkbox" v-model="requestData[field.name]" class="text-[0.8rem] p-0 m-0" />
-              {{ field.name }}
-            </label>
+            <div v-else-if="field.type === 'bool'" class="flex items-center gap-2 text-[0.8rem] text-[#b0bec5]">
+              <input type="checkbox" :id="'bool-' + field.name" v-model="requestData[field.name]" class="text-[0.8rem] p-0 m-0" />
+              <label :for="'bool-' + field.name" class="select-none text-[#b0bec5]">{{ field.name }}</label>
+            </div>
             <input
               v-else-if="field.type === 'bytes'"
               type="text"
