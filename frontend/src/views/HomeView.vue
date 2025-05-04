@@ -568,6 +568,11 @@ const previewGrpcurlCommand = computed(() => {
   return `grpcurl ${tlsFlag} ${certFlag} ${headerFlags} ${dataFlag} ${address} ${serviceMethod}`.replace(/ +/g, ' ').trim()
 })
 
+const topLevelMessageExpanded = ref<Record<string, boolean>>({})
+function toggleTopLevelMessageField(name: string) {
+  topLevelMessageExpanded.value[name] = !topLevelMessageExpanded.value[name]
+}
+
 onMounted(() => {
   profileStore.loadProfiles()
 })
@@ -630,6 +635,12 @@ onMounted(() => {
             <button v-if="field.isRepeated" type="button" class="text-[#42b983] hover:text-[#369870] flex items-center justify-center rounded-full w-5 h-5" style="border: none; background: none; padding: 0;" @click="addRepeatedField(field.name)">
               <span aria-label="Add" title="Add"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="#42b983" stroke-width="2" fill="none"/><line x1="10" y1="6" x2="10" y2="14" stroke="#42b983" stroke-width="2"/><line x1="6" y1="10" x2="14" y2="10" stroke="#42b983" stroke-width="2"/></svg></span>
             </button>
+            <button v-if="field.type === 'message' && field.fields && field.fields.length > 0 && (!requestData[field.name] || !topLevelMessageExpanded[field.name])" type="button" class="text-[#42b983] hover:text-[#369870] flex items-center justify-center rounded-full w-5 h-5" style="border: none; background: none; padding: 0;" @click="toggleTopLevelMessageField(field.name)">
+              <span aria-label="Expand" title="Expand"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="#42b983" stroke-width="2" fill="none"/><line x1="10" y1="6" x2="10" y2="14" stroke="#42b983" stroke-width="2"/><line x1="6" y1="10" x2="14" y2="10" stroke="#42b983" stroke-width="2"/></svg></span>
+            </button>
+            <button v-if="field.type === 'message' && field.fields && field.fields.length > 0 && requestData[field.name] && topLevelMessageExpanded[field.name]" type="button" class="text-[#42b983] hover:text-[#369870] flex items-center justify-center rounded-full w-5 h-5" style="border: none; background: none; padding: 0;" @click="toggleTopLevelMessageField(field.name)">
+              <span aria-label="Collapse" title="Collapse"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="#42b983" stroke-width="2" fill="none"/><line x1="6" y1="10" x2="14" y2="10" stroke="#42b983" stroke-width="2"/></svg></span>
+            </button>
           </div>
           <!-- Repeated fields -->
           <template v-if="field.isRepeated">
@@ -677,7 +688,9 @@ onMounted(() => {
                   :fieldPath="field.name + '.'"
                 />
                 <span v-else-if="field.type === 'group'" class="italic text-[#b0bec5]">Group fields are not supported (legacy protobuf feature).</span>
-                <span v-else class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
+                <span v-else-if="field.type !== 'message'" class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
+                <!-- For message fields, only show unsupported if not expandable (no subfields) -->
+                <span v-else-if="field.type === 'message' && (!field.fields || field.fields.length === 0)" class="italic text-[#b0bec5]">Unsupported type: message</span>
               </div>
               <button type="button" class="ml-2 flex items-center justify-center rounded-full w-5 h-5" style="border: none; background: none; padding: 0;" @click="removeRepeatedField(field.name, idx)">
                 <span aria-label="Remove" title="Remove"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="#e3342f" stroke-width="2" fill="none"/><line x1="6" y1="10" x2="14" y2="10" stroke="#e3342f" stroke-width="2"/></svg></span>
@@ -717,15 +730,17 @@ onMounted(() => {
               :autocomplete="'off'"
               :autocorrect="'off'"
             />
-            <template v-else-if="field.type === 'message' && field.fields && field.fields.length > 0">
+            <template v-else-if="field.type === 'message' && field.fields && field.fields.length > 0 && topLevelMessageExpanded[field.name]">
               <ProtoMessageField
-              :fields="field.fields"
-              v-model="requestData[field.name]"
-              :fieldPath="field.name + '.'"
+                :fields="field.fields"
+                v-model="requestData[field.name]"
+                :fieldPath="field.name + '.'"
               />
             </template>
             <span v-else-if="field.type === 'group'" class="italic text-[#b0bec5]">Group fields are not supported (legacy protobuf feature).</span>
-            <span v-else class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
+            <span v-else-if="field.type !== 'message'" class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
+            <!-- For message fields, only show unsupported if not expandable (no subfields) -->
+            <span v-else-if="field.type === 'message' && (!field.fields || field.fields.length === 0)" class="italic text-[#b0bec5]">Unsupported type: message</span>
           </template>
         </div>
       </form>
