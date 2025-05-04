@@ -575,6 +575,22 @@ function toggleTopLevelMessageField(name: string) {
   topLevelMessageExpanded.value[name] = !topLevelMessageExpanded.value[name]
 }
 
+const methodSearch = ref('')
+
+const filteredServices = computed(() => {
+  if (!methodSearch.value.trim()) return allServices.value
+  const search = methodSearch.value.trim().toLowerCase()
+  return allServices.value
+    .map(service => {
+      const matchingMethods = service.methods.filter(m => m.name.toLowerCase().includes(search))
+      if (matchingMethods.length > 0) {
+        return { ...service, methods: matchingMethods }
+      }
+      return undefined
+    })
+    .filter((svc): svc is { name: string, methods: any[] } => !!svc)
+})
+
 onMounted(() => {
   profileStore.loadProfiles()
 })
@@ -586,6 +602,18 @@ onMounted(() => {
     <section class="flex flex-col flex-1 h-full border-r border-[#2c3e50] bg-[#202733] p-3 scrollable-column">
       <div class="flex items-center justify-between mb-2 min-h-[40px]">
         <h2 class="font-bold text-white whitespace-nowrap">Services & Methods</h2>
+        <div class="relative ml-2 flex-1 max-w-xs">
+          <input
+            v-model="methodSearch"
+            type="text"
+            placeholder="Search methods..."
+            class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-xs text-white focus:outline-none w-full pr-6"
+            style="min-width: 120px;"
+          />
+          <button v-if="methodSearch" @click="methodSearch = ''" class="absolute right-1 top-1/2 -translate-y-1/2 text-[#b0bec5] hover:text-white text-xs px-1 py-0.5 rounded focus:outline-none" style="background: none; border: none;">
+            &times;
+          </button>
+        </div>
       </div>
       <hr class="border-t border-[#2c3e50] mb-3" />
       <div v-if="connectionLoading" class="bg-blue-900 text-blue-200 rounded p-2 mb-2">Connecting to server...</div>
@@ -595,7 +623,7 @@ onMounted(() => {
         No proto services found for this server.
       </div>
       <div v-else-if="!connectionLoading" class="mt-2 space-y-2 overflow-y-auto">
-        <div v-for="service in allServices" :key="service.name" class="">
+        <div v-for="service in filteredServices" :key="service.name" class="">
           <div class="flex items-center select-none">
             <span class="mr-1 cursor-pointer flex items-center" @click.stop="toggleService(service.name)">
               <span v-if="expandedServices[service.name]">
@@ -610,7 +638,7 @@ onMounted(() => {
             <span class="font-semibold text-white cursor-pointer" @click="toggleService(service.name)">{{ service.name }}</span>
           </div>
           <transition name="fade">
-            <div v-show="expandedServices[service.name]" class="ml-5 mt-1 space-y-1">
+            <div v-show="expandedServices[service.name] || methodSearch" class="ml-5 mt-1 space-y-1">
               <div v-for="method in service.methods" :key="method.name"
                    class="px-2 py-1 rounded cursor-pointer text-[#b0bec5] hover:bg-[#2c3e50] hover:text-white"
                    :class="{ 'bg-[#2c3e50] text-white': selectedService === service.name && selectedMethod === method.name }"
