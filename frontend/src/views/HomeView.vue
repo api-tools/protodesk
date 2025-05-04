@@ -441,6 +441,20 @@ function mergeHeaders(serverHeaders: { key: string, value: string }[], perReques
   return merged
 }
 
+function fixRequestDataForProto(input: Record<string, any>, fields: any[]): Record<string, any> {
+  const fixed = { ...input }
+  fields.forEach((field: any) => {
+    if ([
+      'int32', 'int64', 'uint32', 'uint64',
+      'fixed32', 'fixed64', 'sfixed32', 'sfixed64',
+      'sint32', 'sint64', 'float', 'double'
+    ].includes(field.type) && fixed[field.name] === '') {
+      fixed[field.name] = null
+    }
+  })
+  return fixed
+}
+
 async function handleSend() {
   sendLoading.value = true
   sendError.value = ''
@@ -452,19 +466,10 @@ async function handleSend() {
       return
     }
     // Prepare request data, converting empty numeric fields to null
-    const fixedRequestData = { ...requestData.value }
     const fields = (reflectionInputFields.value.length > 0
       ? reflectionInputFields.value
       : (allServices.value.find(svc => svc.name === selectedService.value)?.methods.find(m => m.name === selectedMethod.value)?.inputType.fields || []))
-    fields.forEach((field: any) => {
-      if ([
-        'int32', 'int64', 'uint32', 'uint64',
-        'fixed32', 'fixed64', 'sfixed32', 'sfixed64',
-        'sint32', 'sint64', 'float', 'double'
-      ].includes(field.type) && fixedRequestData[field.name] === '') {
-        fixedRequestData[field.name] = null
-      }
-    })
+    const fixedRequestData = fixRequestDataForProto(requestData.value, fields)
     let requestJSON = ''
     try {
       requestJSON = JSON.stringify(fixedRequestData)
@@ -530,9 +535,14 @@ const previewGrpcurlCommand = computed(() => {
   const headerFlags = Object.entries(headers)
     .map(([k, v]) => `-H '${k}: ${v}'`)
     .join(' ')
+  // Use the same fixRequestDataForProto logic for preview
+  const fields = (reflectionInputFields.value.length > 0
+    ? reflectionInputFields.value
+    : (allServices.value.find(svc => svc.name === selectedService.value)?.methods.find(m => m.name === selectedMethod.value)?.inputType.fields || []))
   let dataFlag = ''
   try {
-    dataFlag = `-d '${JSON.stringify(requestData.value)}'`
+    const fixedRequestData = fixRequestDataForProto(requestData.value, fields)
+    dataFlag = `-d '${JSON.stringify(fixedRequestData)}'`
   } catch {
     dataFlag = ''
   }
