@@ -87,7 +87,8 @@ function collapseMessageField(name: string) {
             <option v-for="ev in field.enumValues" :key="ev" :value="ev">{{ ev }}</option>
           </select>
         </template>
-        <!-- Repeated fields (with vertical line spanning the group) -->
+
+        <!-- Repeated fields (with vertical line spanning the group, but NOT for repeated message fields) -->
         <template v-else-if="field.isRepeated && field.type !== 'message'">
           <div class="repeated-field-group mb-2">
             <div class="flex items-center mb-1">
@@ -123,7 +124,7 @@ function collapseMessageField(name: string) {
             </div>
           </div>
         </template>
-        <!-- Expandable/collapsible message fields (plus to the right of label) -->
+        <!-- Expandable/collapsible message fields (plus to the right of label, at all levels) -->
         <template v-else-if="field.type === 'message' && field.fields && field.fields.length > 0">
           <div class="mb-2">
             <div class="flex items-center mb-1">

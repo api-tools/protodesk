@@ -717,12 +717,13 @@ onMounted(() => {
               :autocomplete="'off'"
               :autocorrect="'off'"
             />
-            <ProtoMessageField
-              v-else-if="field.type === 'message' && field.fields && field.fields.length > 0"
+            <template v-else-if="field.type === 'message' && field.fields && field.fields.length > 0">
+              <ProtoMessageField
               :fields="field.fields"
               v-model="requestData[field.name]"
               :fieldPath="field.name + '.'"
-            />
+              />
+            </template>
             <span v-else-if="field.type === 'group'" class="italic text-[#b0bec5]">Group fields are not supported (legacy protobuf feature).</span>
             <span v-else class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
           </template>
@@ -777,7 +778,7 @@ onMounted(() => {
         <div v-if="sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ sendError }}</div>
         <span v-if="formattedResponse">{{ formattedResponse }}</span>
         <span v-else class="italic">[No response yet]</span>
-      </div>
+    </div>
     </section>
   </div>
 </template>
