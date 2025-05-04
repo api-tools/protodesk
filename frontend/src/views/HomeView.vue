@@ -106,6 +106,22 @@ const perRequestHeadersJson = ref('')
 const perRequestHeaders = ref<{ key: string, value: string }[]>([])
 const perRequestHeadersError = ref('')
 const showHeadersModal = ref(false)
+const showPreviewModal = ref(false)
+const previewRequestJSON = computed(() => {
+  try {
+    return JSON.stringify(requestData.value, null, 2)
+  } catch {
+    return '[Invalid request data]'
+  }
+})
+const previewHeadersJSON = computed(() => {
+  try {
+    const merged = mergeHeaders(serverHeaders.value, perRequestHeaders.value)
+    return JSON.stringify(merged, null, 2)
+  } catch {
+    return '[Invalid headers]'
+  }
+})
 
 // Helper: get server headers from active profile
 const serverHeaders = computed(() => {
@@ -486,6 +502,25 @@ const formattedResponse = computed(() => {
   }
 })
 
+const previewGrpcurlCommand = computed(() => {
+  if (!activeProfile.value || !selectedService.value || !selectedMethod.value) return ''
+  const address = `${activeProfile.value.host}:${activeProfile.value.port}`
+  const headers = mergeHeaders(serverHeaders.value, perRequestHeaders.value)
+  const headerFlags = Object.entries(headers)
+    .map(([k, v]) => `-H '${k}: ${v}'`)
+    .join(' ')
+  let dataFlag = ''
+  try {
+    dataFlag = `-d '${JSON.stringify(requestData.value)}'`
+  } catch {
+    dataFlag = ''
+  }
+  const tlsFlag = activeProfile.value.tlsEnabled ? '' : '-plaintext'
+  const certFlag = activeProfile.value.certificatePath ? `-cacert '${activeProfile.value.certificatePath}'` : ''
+  const serviceMethod = `${selectedService.value}/${selectedMethod.value}`
+  return `grpcurl ${tlsFlag} ${certFlag} ${headerFlags} ${dataFlag} ${address} ${serviceMethod}`.replace(/ +/g, ' ').trim()
+})
+
 onMounted(() => {
   profileStore.loadProfiles()
 })
@@ -526,19 +561,20 @@ onMounted(() => {
     </section>
     <!-- Middle column: Request Builder -->
     <section class="flex flex-col flex-[3] h-full border-r border-[#2c3e50] bg-[#232b36] p-3">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="font-bold text-white">Request Builder</h2>
-        <div class="flex items-center gap-2">
-          <button v-if="selectedService && selectedMethod" class="px-3 py-1 bg-[#42b983] text-[#222] rounded font-bold hover:bg-[#369870] transition ml-4" @click="handleSend">Send</button>
-          <button v-if="selectedService && selectedMethod" class="text-[#42b983] underline hover:text-[#369870] text-xs ml-2" @click="openHeadersModal">Edit Headers</button>
+      <div class="flex items-center justify-between mb-2 min-h-[40px]">
+        <h2 class="font-bold text-white whitespace-nowrap">Request Builder</h2>
+        <div class="flex items-center gap-2 w-full">
+          <div class="flex-1"></div>
+          <span v-if="selectedService && selectedMethod" class="text-[#42b983] underline hover:text-[#369870] text-xs ml-2 cursor-pointer" @click="openHeadersModal">Edit Headers</span>
+          <span v-if="selectedService && selectedMethod" class="text-[#42b983] underline hover:text-[#369870] text-xs ml-2 cursor-pointer" @click="showPreviewModal = true">Preview</span>
+          <button v-if="selectedService && selectedMethod" class="px-3 py-1 bg-[#42b983] text-white rounded font-bold hover:bg-[#369870] transition ml-4" @click="handleSend" style="margin-left:auto;">Send</button>
         </div>
       </div>
       <hr class="border-t border-[#2c3e50] mb-3" />
       <div v-if="inputFieldsLoading" class="bg-blue-900 text-blue-200 rounded p-2 mb-2">Loading request fields...</div>
       <div v-if="inputFieldsError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ inputFieldsError }}</div>
       <div v-if="mergedHeaders.length > 0" class="mb-2 text-[#b0bec5] text-xs">
-        <span class="font-semibold">Merged Headers:</span>
-        <span class="ml-2">{{ mergedHeaders.map(h => h.key + ': ' + h.value).join(', ') }}</span>
+        <!-- Merged Headers display removed as requested -->
       </div>
       <form v-if="selectedService && selectedMethod && ((reflectionInputFields.length > 0 && reflectionInputFields.some(f => !f.isRepeated || (f.isRepeated && requestData[f.name] && requestData[f.name].length > 0))) || allServices.find(svc => svc.name === selectedService)?.methods.find(m => m.name === selectedMethod)?.inputType?.fields?.length)" @submit.prevent>
         <div v-for="field in (reflectionInputFields.length > 0 ? reflectionInputFields : allServices.find(svc => svc.name === selectedService)?.methods.find(m => m.name === selectedMethod)?.inputType.fields || [])" :key="field.name" class="mb-3">
@@ -660,14 +696,28 @@ onMounted(() => {
           </div>
         </div>
       </div>
+      <!-- Preview request modal -->
+      <div v-if="showPreviewModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+        <div class="bg-white text-[#222] rounded-lg shadow-lg p-6 w-full max-w-lg text-[0.8rem] relative">
+          <button class="absolute top-2 right-4 text-xl text-gray-400 hover:text-gray-700 font-bold" @click="showPreviewModal = false">&times;</button>
+          <h3 class="text-lg font-bold mb-4">Request preview</h3>
+          <textarea
+            readonly
+            class="bg-gray-100 rounded p-2 text-xs w-full font-mono border border-gray-300"
+            style="height: 120px; resize: none; font-size: 0.8rem; line-height: 1.2;"
+            :value="previewGrpcurlCommand"
+          ></textarea>
+        </div>
+      </div>
     </section>
     <!-- Right column: Response Viewer -->
     <section class="flex flex-col flex-[4] h-full bg-[#232b36] p-3">
-      <div class="flex items-center justify-between mb-2">
-        <h2 class="font-bold text-white">Response</h2>
+      <div class="flex items-center justify-between mb-2 min-h-[40px]">
+        <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
       </div>
       <hr class="border-t border-[#2c3e50] mb-3" />
       <div class="flex-1 text-[#b0bec5] whitespace-pre-wrap font-mono" style="font-size: 0.7rem;">
+        <div v-if="sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ sendError }}</div>
         <span v-if="formattedResponse">{{ formattedResponse }}</span>
         <span v-else class="italic">[No response yet]</span>
       </div>
