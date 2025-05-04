@@ -3,6 +3,8 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { Greet, ListProtoDefinitionsByProfile, ListServerServices, ConnectToServer, GetMethodInputDescriptor, SavePerRequestHeaders, GetPerRequestHeaders, CallGRPCMethod } from '@wailsjs/go/app/App'
 import { useServerProfileStore } from '@/stores/serverProfile'
 import ProtoMessageField from '@/components/ProtoMessageField.vue'
+import ResponseViewer from '@/components/ResponseViewer.vue'
+import PreviewModal from '@/components/PreviewModal.vue'
 
 const name = ref('')
 const resultText = ref('')
@@ -582,7 +584,10 @@ onMounted(() => {
   <div class="flex flex-row w-full text-[0.8rem] overflow-hidden" style="height: 100vh; overflow: hidden;">
     <!-- Left column: Service/Method Tree -->
     <section class="flex flex-col flex-1 h-full border-r border-[#2c3e50] bg-[#202733] p-3 scrollable-column">
-      <h2 class="font-bold text-white mb-2">Services & Methods</h2>
+      <div class="flex items-center justify-between mb-2 min-h-[40px]">
+        <h2 class="font-bold text-white whitespace-nowrap">Services & Methods</h2>
+      </div>
+      <hr class="border-t border-[#2c3e50] mb-3" />
       <div v-if="connectionLoading" class="bg-blue-900 text-blue-200 rounded p-2 mb-2">Connecting to server...</div>
       <div v-if="connectionError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ connectionError }}</div>
       <div v-if="reflectionError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ reflectionError }}</div>
@@ -591,15 +596,21 @@ onMounted(() => {
       </div>
       <div v-else-if="!connectionLoading" class="mt-2 space-y-2 overflow-y-auto">
         <div v-for="service in allServices" :key="service.name" class="">
-          <div class="flex items-center cursor-pointer select-none" @click="toggleService(service.name)">
-            <span class="mr-1 text-[#b0bec5]">
-              <span v-if="expandedServices[service.name]">▼</span>
-              <span v-else>▶</span>
+          <div class="flex items-center select-none">
+            <span class="mr-1 cursor-pointer flex items-center" @click.stop="toggleService(service.name)">
+              <span v-if="expandedServices[service.name]">
+                <!-- Down chevron SVG -->
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M6 8l4 5 4-5" stroke="#b0bec5" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span v-else>
+                <!-- Right chevron SVG -->
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M7 6l5 4-5 4" stroke="#b0bec5" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
             </span>
-            <span class="font-semibold text-white">{{ service.name }}</span>
+            <span class="font-semibold text-white cursor-pointer" @click="toggleService(service.name)">{{ service.name }}</span>
           </div>
           <transition name="fade">
-            <div v-show="expandedServices[service.name] !== false" class="ml-5 mt-1 space-y-1">
+            <div v-show="expandedServices[service.name]" class="ml-5 mt-1 space-y-1">
               <div v-for="method in service.methods" :key="method.name"
                    class="px-2 py-1 rounded cursor-pointer text-[#b0bec5] hover:bg-[#2c3e50] hover:text-white"
                    :class="{ 'bg-[#2c3e50] text-white': selectedService === service.name && selectedMethod === method.name }"
@@ -770,31 +781,18 @@ onMounted(() => {
         </div>
       </div>
       <!-- Preview request modal -->
-      <div v-if="showPreviewModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-        <div class="bg-white text-[#222] rounded-lg shadow-lg p-6 w-full max-w-lg text-[0.8rem] relative">
-          <button class="absolute top-2 right-4 text-xl text-gray-400 hover:text-gray-700 font-bold" @click="showPreviewModal = false">&times;</button>
-          <h3 class="text-lg font-bold mb-4">Request preview</h3>
-          <textarea
-            readonly
-            class="bg-gray-100 rounded p-2 text-xs w-full font-mono border border-gray-300"
-            style="height: 120px; resize: none; font-size: 0.8rem; line-height: 1.2;"
-            :value="previewGrpcurlCommand"
-          ></textarea>
-        </div>
-      </div>
+      <PreviewModal
+        :show="showPreviewModal"
+        :previewGrpcurlCommand="previewGrpcurlCommand"
+        @close="showPreviewModal = false"
+      />
     </section>
     <!-- Right column: Response Viewer -->
-    <section class="flex flex-col flex-1 h-full bg-[#232b36] p-3 scrollable-column">
-      <div class="flex items-center justify-between mb-2 min-h-[40px]">
-        <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
-      </div>
-      <hr class="border-t border-[#2c3e50] mb-3" />
-      <div class="flex-1 text-[#b0bec5] whitespace-pre-wrap font-mono" style="font-size: 0.7rem;">
-        <div v-if="sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ sendError }}</div>
-        <span v-if="formattedResponse">{{ formattedResponse }}</span>
-        <span v-else class="italic">[No response yet]</span>
-    </div>
-    </section>
+    <ResponseViewer
+      :sendError="sendError"
+      :formattedResponse="formattedResponse"
+      :loading="sendLoading"
+    />
   </div>
 </template>
 
