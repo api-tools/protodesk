@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 
+	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/grpcreflect"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -107,10 +108,11 @@ func (m *DefaultGRPCClientManager) ListServicesAndMethods(conn *grpc.ClientConn)
 }
 
 type FieldDescriptor struct {
-	Name       string   `json:"name"`
-	Type       string   `json:"type"`
-	IsRepeated bool     `json:"isRepeated"`
-	EnumValues []string `json:"enumValues,omitempty"`
+	Name       string            `json:"name"`
+	Type       string            `json:"type"`
+	IsRepeated bool              `json:"isRepeated"`
+	EnumValues []string          `json:"enumValues,omitempty"`
+	Fields     []FieldDescriptor `json:"fields,omitempty"`
 }
 
 func protoTypeToString(t descriptorpb.FieldDescriptorProto_Type) string {
@@ -156,6 +158,31 @@ func protoTypeToString(t descriptorpb.FieldDescriptorProto_Type) string {
 	}
 }
 
+// Helper to recursively build FieldDescriptor for a message type
+func buildFieldDescriptors(msgDesc *desc.MessageDescriptor) []FieldDescriptor {
+	fields := msgDesc.GetFields()
+	var result []FieldDescriptor
+	for _, f := range fields {
+		fd := FieldDescriptor{
+			Name:       f.GetName(),
+			Type:       protoTypeToString(f.GetType()),
+			IsRepeated: f.IsRepeated(),
+		}
+		if f.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM && f.GetEnumType() != nil {
+			enumDesc := f.GetEnumType()
+			for _, v := range enumDesc.GetValues() {
+				fd.EnumValues = append(fd.EnumValues, v.GetName())
+			}
+		}
+		if f.GetType() == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE && f.GetMessageType() != nil {
+			// Recursively build subfields for message type
+			fd.Fields = buildFieldDescriptors(f.GetMessageType())
+		}
+		result = append(result, fd)
+	}
+	return result
+}
+
 // GetMethodInputDescriptor uses reflection to get the input type fields for a given service/method
 func (m *DefaultGRPCClientManager) GetMethodInputDescriptor(conn *grpc.ClientConn, serviceName, methodName string) ([]FieldDescriptor, error) {
 	ctx := context.Background()
@@ -171,21 +198,6 @@ func (m *DefaultGRPCClientManager) GetMethodInputDescriptor(conn *grpc.ClientCon
 		return nil, fmt.Errorf("method not found: %s", methodName)
 	}
 	inputType := mDesc.GetInputType()
-	fields := inputType.GetFields()
-	var result []FieldDescriptor
-	for _, f := range fields {
-		fd := FieldDescriptor{
-			Name:       f.GetName(),
-			Type:       protoTypeToString(f.GetType()),
-			IsRepeated: f.IsRepeated(),
-		}
-		if f.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM && f.GetEnumType() != nil {
-			enumDesc := f.GetEnumType()
-			for _, v := range enumDesc.GetValues() {
-				fd.EnumValues = append(fd.EnumValues, v.GetName())
-			}
-		}
-		result = append(result, fd)
-	}
-	return result, nil
+	// Use the recursive helper for the top-level message
+	return buildFieldDescriptors(inputType), nil
 }

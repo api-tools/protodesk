@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { Greet, ListProtoDefinitionsByProfile, ListServerServices, ConnectToServer, GetMethodInputDescriptor, SavePerRequestHeaders, GetPerRequestHeaders, CallGRPCMethod } from '@wailsjs/go/app/App'
 import { useServerProfileStore } from '@/stores/serverProfile'
+import ProtoMessageField from '@/components/ProtoMessageField.vue'
 
 const name = ref('')
 const resultText = ref('')
@@ -372,12 +373,15 @@ watch([selectedService, selectedMethod, activeProfile, reflectionServices], asyn
       let fields = await GetMethodInputDescriptor(profile.id, svc, mth);
       if (!Array.isArray(fields)) fields = [];
       reflectionInputFields.value = fields;
+      console.log('Reflection fields:', fields);
       if (!isUnmounted && inputFieldsLoading && typeof inputFieldsLoading.value !== 'undefined') inputFieldsLoading.value = false;
       // Initialize requestData
       const data: Record<string, any> = {};
       for (const field of fields) {
         if (field.type === 'bool') {
           data[field.name] = false;
+        } else if (field.type === 'message') {
+          data[field.name] = null;
         } else {
           data[field.name] = field.isRepeated ? [] : '';
         }
@@ -400,6 +404,8 @@ watch([selectedService, selectedMethod, activeProfile, reflectionServices], asyn
       for (const field of fields) {
         if (field.type === 'bool') {
           data[field.name] = false;
+        } else if (field.type === 'message') {
+          data[field.name] = null;
         } else {
           data[field.name] = field.isRepeated ? [] : ''
         }
@@ -450,6 +456,16 @@ function fixRequestDataForProto(input: Record<string, any>, fields: any[]): Reco
       'sint32', 'sint64', 'float', 'double'
     ].includes(field.type) && fixed[field.name] === '') {
       fixed[field.name] = null
+    } else if (field.type === 'message') {
+      if (fixed[field.name] === '' || fixed[field.name] === null) {
+        fixed[field.name] = null
+      } else if (typeof fixed[field.name] === 'object') {
+        fixed[field.name] = fixRequestDataForProto(fixed[field.name], field.fields)
+        // If all subfields are null/empty/empty array, set to null
+        if (Object.values(fixed[field.name]).every(v => v === null || v === '' || (Array.isArray(v) && v.length === 0))) {
+          fixed[field.name] = null
+        }
+      }
     }
   })
   return fixed
@@ -560,7 +576,7 @@ onMounted(() => {
 <template>
   <div class="flex flex-row w-full text-[0.8rem] overflow-hidden" style="height: 100vh; overflow: hidden;">
     <!-- Left column: Service/Method Tree -->
-    <section class="flex flex-col flex-[2] min-w-[180px] max-w-[320px] h-full border-r border-[#2c3e50] bg-[#202733] p-3">
+    <section class="flex flex-col flex-1 h-full border-r border-[#2c3e50] bg-[#202733] p-3 scrollable-column">
       <h2 class="font-bold text-white mb-2">Services & Methods</h2>
       <div v-if="connectionLoading" class="bg-blue-900 text-blue-200 rounded p-2 mb-2">Connecting to server...</div>
       <div v-if="connectionError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ connectionError }}</div>
@@ -591,7 +607,7 @@ onMounted(() => {
       </div>
     </section>
     <!-- Middle column: Request Builder -->
-    <section class="flex flex-col flex-[3] h-full border-r border-[#2c3e50] bg-[#232b36] p-3">
+    <section class="flex flex-col flex-1 h-full border-r border-[#2c3e50] bg-[#232b36] p-3 scrollable-column">
       <div class="flex items-center justify-between mb-2 min-h-[40px]">
         <h2 class="font-bold text-white whitespace-nowrap">Request Builder</h2>
         <div class="flex items-center gap-2 w-full">
@@ -654,7 +670,12 @@ onMounted(() => {
                   :autocomplete="'off'"
                   :autocorrect="'off'"
                 />
-                <span v-else-if="field.type === 'message'" class="italic text-[#b0bec5]">Nested message fields are not yet supported.</span>
+                <ProtoMessageField
+                  v-else-if="field.type === 'message' && field.fields && field.fields.length > 0"
+                  :fields="field.fields"
+                  v-model="requestData[field.name]"
+                  :fieldPath="field.name + '.'"
+                />
                 <span v-else-if="field.type === 'group'" class="italic text-[#b0bec5]">Group fields are not supported (legacy protobuf feature).</span>
                 <span v-else class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
               </div>
@@ -696,7 +717,12 @@ onMounted(() => {
               :autocomplete="'off'"
               :autocorrect="'off'"
             />
-            <span v-else-if="field.type === 'message'" class="italic text-[#b0bec5]">Nested message fields are not yet supported.</span>
+            <ProtoMessageField
+              v-else-if="field.type === 'message' && field.fields && field.fields.length > 0"
+              :fields="field.fields"
+              v-model="requestData[field.name]"
+              :fieldPath="field.name + '.'"
+            />
             <span v-else-if="field.type === 'group'" class="italic text-[#b0bec5]">Group fields are not supported (legacy protobuf feature).</span>
             <span v-else class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
           </template>
@@ -742,7 +768,7 @@ onMounted(() => {
       </div>
     </section>
     <!-- Right column: Response Viewer -->
-    <section class="flex flex-col flex-[4] h-full bg-[#232b36] p-3">
+    <section class="flex flex-col flex-1 h-full bg-[#232b36] p-3 scrollable-column">
       <div class="flex items-center justify-between mb-2 min-h-[40px]">
         <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
       </div>
@@ -770,5 +796,22 @@ onMounted(() => {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+.scrollable-column {
+  min-height: 0;
+  flex: 1 1 0%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #42b983 #232b36;
+}
+.scrollable-column::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollable-column::-webkit-scrollbar-thumb {
+  background: #42b983;
+  border-radius: 4px;
+}
+.scrollable-column::-webkit-scrollbar-track {
+  background: #232b36;
 }
 </style>
