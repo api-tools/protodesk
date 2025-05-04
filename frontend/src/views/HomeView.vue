@@ -451,10 +451,23 @@ async function handleSend() {
       sendLoading.value = false
       return
     }
-    // Validate requestData
+    // Prepare request data, converting empty numeric fields to null
+    const fixedRequestData = { ...requestData.value }
+    const fields = (reflectionInputFields.value.length > 0
+      ? reflectionInputFields.value
+      : (allServices.value.find(svc => svc.name === selectedService.value)?.methods.find(m => m.name === selectedMethod.value)?.inputType.fields || []))
+    fields.forEach((field: any) => {
+      if ([
+        'int32', 'int64', 'uint32', 'uint64',
+        'fixed32', 'fixed64', 'sfixed32', 'sfixed64',
+        'sint32', 'sint64', 'float', 'double'
+      ].includes(field.type) && fixedRequestData[field.name] === '') {
+        fixedRequestData[field.name] = null
+      }
+    })
     let requestJSON = ''
     try {
-      requestJSON = JSON.stringify(requestData.value)
+      requestJSON = JSON.stringify(fixedRequestData)
     } catch (e) {
       sendError.value = e instanceof Error ? 'Invalid request data: ' + e.message : 'Invalid request data: ' + String(e)
       sendLoading.value = false
