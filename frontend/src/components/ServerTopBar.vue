@@ -52,7 +52,7 @@ const selectedProfileId = computed({
 
 const profileIdToDelete = ref<string | null>(null)
 
-const props = defineProps<{ setConnectionStatus: (status: 'connected' | 'not_connected' | 'unknown') => void }>()
+const props = defineProps<{ setConnectionStatus?: (status: 'connected' | 'not_connected' | 'unknown') => void }>()
 
 // Add an event emitter for cross-component communication
 const emit = defineEmits(['server-profile-updated'])
@@ -64,7 +64,7 @@ async function selectProfile(id: string) {
     // Check connection status
     const isConnected = await IsServerConnected(id)
     connectionStatus.value = isConnected ? 'connected' : 'not_connected'
-    props.setConnectionStatus(connectionStatus.value)
+    props.setConnectionStatus?.(connectionStatus.value)
     // Fetch endpoints (services/methods)
     const defs = await ListProtoDefinitionsByProfile(id)
     endpoints.value = []
@@ -82,7 +82,7 @@ async function selectProfile(id: string) {
     }
   } catch (e) {
     connectionStatus.value = 'not_connected'
-    props.setConnectionStatus('not_connected')
+    props.setConnectionStatus?.(connectionStatus.value)
     connectionErrorMessage.value = 'Failed to connect to server: ' + (typeof e === 'string' ? e : (e && typeof e === 'object' && 'message' in e ? (e as any).message : JSON.stringify(e)))
     showConnectionErrorModal.value = true
     console.error('Failed to connect to server:', e)
@@ -274,7 +274,7 @@ async function removeProfile(id: string) {
   await profileStore.loadProfiles()
   console.log('Profiles after deletion:', profileStore.profiles)
   profileStore.setActiveProfile(null)
-  props.setConnectionStatus('unknown')
+  props.setConnectionStatus?.(connectionStatus.value)
   showModal.value = false
   // Clear modal fields and protoFolders
   modalProfile.value = { id: '', name: '', host: '', port: 50051, tlsEnabled: false, certificatePath: '', useReflection: false, headers: [] };

@@ -1,19 +1,10 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
-import HomeView from '../views/HomeView.vue'
-import ProtoDefinitionsView from '../views/ProtoDefinitionsView.vue'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
-export const router = createRouter({
-  history: createWebHashHistory(),
-  routes: [
-    {
-      path: '/',
-      name: 'home',
-      component: HomeView
-    },
-    {
-      path: '/proto-definitions',
-      name: 'proto-definitions',
-      component: ProtoDefinitionsView
-    }
-  ]
+const routes: RouteRecordRaw[] = [
+  // No routes defined. Add routes here if needed.
+]
+
+export default createRouter({
+  history: createWebHistory(),
+  routes
 })
