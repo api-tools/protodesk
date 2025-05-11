@@ -65,10 +65,12 @@ const previewGrpcurlCommand = computed(() => {
     .map(([k, v]) => `-H '${k}: ${v}'`)
     .join(' ')
   // Use the same fixRequestDataForProto logic for preview
-  const fields = reflectionInputFields.value
+  const fields = reflectionInputFields.value.length > 0
+    ? reflectionInputFields.value
+    : (allServices.value.find(svc => svc.name === selectedService.value)?.methods.find(m => m.name === selectedMethod.value)?.inputType.fields || [])
   let dataFlag = ''
   try {
-    const fixedRequestData = requestData.value // already fixed by initializeRequestData
+    const fixedRequestData = fixRequestDataForProto(requestData.value, fields)
     dataFlag = `-d '${JSON.stringify(fixedRequestData)}'`
   } catch {
     dataFlag = ''
@@ -501,7 +503,7 @@ watch([showHeadersModal, selectedService, selectedMethod, activeProfile], async 
       </div>
       <div class="resize-handle" @mousedown="e => onDragStart('left', e)"></div>
       <!-- Middle column: Request Builder -->
-      <div :style="{ width: middleWidth + '%', boxSizing: 'border-box', borderRight: '1px solid #2c3e50', background: '#232b36', padding: '16px', height: '100%', overflow: 'auto' }">
+      <div :style="{ width: middleWidth + '%', boxSizing: 'border-box', borderRight: '1px solid #2c3e50', background: '#232b36', height: '100%', overflow: 'auto' }">
         <RequestBuilder
           :fields="fields"
           :requestData="requestData"
