@@ -16,6 +16,7 @@ import (
 	"github.com/jhump/protoreflect/dynamic"
 	"github.com/jhump/protoreflect/grpcreflect"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	reflectpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
 )
@@ -364,14 +365,7 @@ func (a *App) CallGRPCMethod(
 		return "", fmt.Errorf("method not found: %s", methodName)
 	}
 
-	// 3. Build request message dynamically
-	inputType := mDesc.GetInputType()
-	reqMsg := dynamic.NewMessage(inputType)
-	if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
-		return "", fmt.Errorf("failed to unmarshal request: %w", err)
-	}
-
-	// 4. Set up headers
+	// 3. Set up headers
 	md := metadata.New(nil)
 	if headersJSON != "" {
 		var headers map[string]string
@@ -383,19 +377,67 @@ func (a *App) CallGRPCMethod(
 	}
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
-	// 5. Invoke the method
-	outType := mDesc.GetOutputType()
-	respMsg := dynamic.NewMessage(outType)
-	methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
-	err = conn.Invoke(ctx, methodFullName, reqMsg, respMsg)
-	if err != nil {
-		return "", fmt.Errorf("gRPC call failed: %w", err)
+	// 4. Handle method type
+	if mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
+		// Client streaming (single response)
+		// Expect requestJSON to be a JSON array
+		var arr []json.RawMessage
+		if err := json.Unmarshal([]byte(requestJSON), &arr); err != nil {
+			return "", fmt.Errorf("expected JSON array for client streaming: %w", err)
+		}
+		inputType := mDesc.GetInputType()
+		streamDesc := &grpc.StreamDesc{
+			ClientStreams: true,
+			ServerStreams: false,
+		}
+		methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+		stream, err := conn.NewStream(ctx, streamDesc, methodFullName)
+		if err != nil {
+			return "", fmt.Errorf("failed to open client stream: %w", err)
+		}
+		s := grpc.ClientStream(stream)
+		for _, msgBytes := range arr {
+			msg := dynamic.NewMessage(inputType)
+			if err := msg.UnmarshalJSON(msgBytes); err != nil {
+				return "", fmt.Errorf("failed to unmarshal stream message: %w", err)
+			}
+			if err := s.SendMsg(msg); err != nil {
+				return "", fmt.Errorf("failed to send stream message: %w", err)
+			}
+		}
+		if err := s.CloseSend(); err != nil {
+			return "", fmt.Errorf("failed to close stream: %w", err)
+		}
+		outType := mDesc.GetOutputType()
+		respMsg := dynamic.NewMessage(outType)
+		if err := s.RecvMsg(respMsg); err != nil {
+			return "", fmt.Errorf("failed to receive response: %w", err)
+		}
+		respJSON, err := respMsg.MarshalJSON()
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal response: %w", err)
+		}
+		return string(respJSON), nil
+	} else if !mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
+		// Unary
+		inputType := mDesc.GetInputType()
+		reqMsg := dynamic.NewMessage(inputType)
+		if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
+			return "", fmt.Errorf("failed to unmarshal request: %w", err)
+		}
+		outType := mDesc.GetOutputType()
+		respMsg := dynamic.NewMessage(outType)
+		methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+		err = conn.Invoke(ctx, methodFullName, reqMsg, respMsg)
+		if err != nil {
+			return "", fmt.Errorf("gRPC call failed: %w", err)
+		}
+		respJSON, err := respMsg.MarshalJSON()
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal response: %w", err)
+		}
+		return string(respJSON), nil
+	} else {
+		return "", fmt.Errorf("server-streaming and bidi-streaming methods are not yet supported")
 	}
-
-	// 6. Marshal response to JSON
-	respJSON, err := respMsg.MarshalJSON()
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-	return string(respJSON), nil
 }
