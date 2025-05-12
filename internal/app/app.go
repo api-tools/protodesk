@@ -380,7 +380,6 @@ func (a *App) CallGRPCMethod(
 	// 4. Handle method type
 	if mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
 		// Client streaming (single response)
-		// Expect requestJSON to be a JSON array
 		var arr []json.RawMessage
 		if err := json.Unmarshal([]byte(requestJSON), &arr); err != nil {
 			return "", fmt.Errorf("expected JSON array for client streaming: %w", err)
@@ -418,6 +417,103 @@ func (a *App) CallGRPCMethod(
 			return "", fmt.Errorf("failed to marshal response: %w", err)
 		}
 		return string(respJSON), nil
+	} else if !mDesc.IsClientStreaming() && mDesc.IsServerStreaming() {
+		// Server streaming (single request, multiple responses)
+		inputType := mDesc.GetInputType()
+		reqMsg := dynamic.NewMessage(inputType)
+		if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
+			return "", fmt.Errorf("failed to unmarshal request: %w", err)
+		}
+		streamDesc := &grpc.StreamDesc{
+			ClientStreams: false,
+			ServerStreams: true,
+		}
+		methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+		stream, err := conn.NewStream(ctx, streamDesc, methodFullName)
+		if err != nil {
+			return "", fmt.Errorf("failed to open server stream: %w", err)
+		}
+		s := grpc.ClientStream(stream)
+		if err := s.SendMsg(reqMsg); err != nil {
+			return "", fmt.Errorf("failed to send request: %w", err)
+		}
+		if err := s.CloseSend(); err != nil {
+			return "", fmt.Errorf("failed to close send: %w", err)
+		}
+		outType := mDesc.GetOutputType()
+		var responses []json.RawMessage
+		for {
+			respMsg := dynamic.NewMessage(outType)
+			err := s.RecvMsg(respMsg)
+			if err != nil {
+				if err.Error() == "EOF" {
+					break
+				}
+				return "", fmt.Errorf("failed to receive response: %w", err)
+			}
+			respJSON, err := respMsg.MarshalJSON()
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal response: %w", err)
+			}
+			responses = append(responses, respJSON)
+		}
+		finalJSON, err := json.Marshal(responses)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal responses array: %w", err)
+		}
+		return string(finalJSON), nil
+	} else if mDesc.IsClientStreaming() && mDesc.IsServerStreaming() {
+		// Bidirectional streaming (multiple requests, multiple responses)
+		var arr []json.RawMessage
+		if err := json.Unmarshal([]byte(requestJSON), &arr); err != nil {
+			return "", fmt.Errorf("expected JSON array for bidi streaming: %w", err)
+		}
+		inputType := mDesc.GetInputType()
+		streamDesc := &grpc.StreamDesc{
+			ClientStreams: true,
+			ServerStreams: true,
+		}
+		methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+		stream, err := conn.NewStream(ctx, streamDesc, methodFullName)
+		if err != nil {
+			return "", fmt.Errorf("failed to open bidi stream: %w", err)
+		}
+		s := grpc.ClientStream(stream)
+		// Send all requests
+		for _, msgBytes := range arr {
+			msg := dynamic.NewMessage(inputType)
+			if err := msg.UnmarshalJSON(msgBytes); err != nil {
+				return "", fmt.Errorf("failed to unmarshal stream message: %w", err)
+			}
+			if err := s.SendMsg(msg); err != nil {
+				return "", fmt.Errorf("failed to send stream message: %w", err)
+			}
+		}
+		if err := s.CloseSend(); err != nil {
+			return "", fmt.Errorf("failed to close send: %w", err)
+		}
+		outType := mDesc.GetOutputType()
+		var responses []json.RawMessage
+		for {
+			respMsg := dynamic.NewMessage(outType)
+			err := s.RecvMsg(respMsg)
+			if err != nil {
+				if err.Error() == "EOF" {
+					break
+				}
+				return "", fmt.Errorf("failed to receive response: %w", err)
+			}
+			respJSON, err := respMsg.MarshalJSON()
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal response: %w", err)
+			}
+			responses = append(responses, respJSON)
+		}
+		finalJSON, err := json.Marshal(responses)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal responses array: %w", err)
+		}
+		return string(finalJSON), nil
 	} else if !mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
 		// Unary
 		inputType := mDesc.GetInputType()
@@ -438,6 +534,6 @@ func (a *App) CallGRPCMethod(
 		}
 		return string(respJSON), nil
 	} else {
-		return "", fmt.Errorf("server-streaming and bidi-streaming methods are not yet supported")
+		return "", fmt.Errorf("unknown gRPC method type")
 	}
 }
