@@ -60,8 +60,16 @@ let startRight = 0
 const previewGrpcurlCommand = computed(() => {
   if (!activeProfile.value || !selectedService.value || !selectedMethod.value) return ''
   const address = `${activeProfile.value.host}:${activeProfile.value.port}`
-  const headers = mergedHeaders.value
-  const headerFlags = Object.entries(headers)
+  // Convert array of {key, value} to object
+  const headersArray = mergedHeaders.value
+  const headersObj = Array.isArray(headersArray)
+    ? Object.fromEntries(headersArray.map(h => [h.key, h.value]))
+    : headersArray
+  // TEMP DEBUG: Log headersObj to console
+  if (typeof window !== 'undefined') {
+    console.log('DEBUG: headersObj for previewGrpcurlCommand:', headersObj)
+  }
+  const headerFlags = Object.entries(headersObj)
     .map(([k, v]) => `-H '${k}: ${v}'`)
     .join(' ')
   // Use the same fixRequestDataForProto logic for preview
@@ -78,6 +86,7 @@ const previewGrpcurlCommand = computed(() => {
   const tlsFlag = activeProfile.value.tlsEnabled ? '' : '-plaintext'
   const certFlag = activeProfile.value.certificatePath ? `-cacert '${activeProfile.value.certificatePath}'` : ''
   const serviceMethod = `${selectedService.value}/${selectedMethod.value}`
+  // Always include headerFlags, even if empty (for debug)
   return `grpcurl ${tlsFlag} ${certFlag} ${headerFlags} ${dataFlag} ${address} ${serviceMethod}`.replace(/ +/g, ' ').trim()
 })
 
@@ -147,10 +156,10 @@ function initializeRequestData(fields: Field[]): Record<string, any> {
   for (const field of fields) {
     if (field.type === 'bool') {
       data[field.name] = false;
-    } else if (field.type === 'message') {
-      data[field.name] = null;
+    } else if (field.isRepeated) {
+      data[field.name] = [];
     } else {
-      data[field.name] = field.isRepeated ? [] : '';
+      data[field.name] = null;
     }
   }
   return data;
@@ -347,11 +356,14 @@ async function handleSend() {
       sendLoading.value = false
       return
     }
-    // Merge headers
+    // Merge headers and convert to object
     const merged = mergedHeaders.value
+    const headersObj = Array.isArray(merged)
+      ? Object.fromEntries(merged.map(h => [h.key, h.value]))
+      : merged
     let headersJSON = ''
     try {
-      headersJSON = JSON.stringify(merged)
+      headersJSON = JSON.stringify(headersObj)
     } catch (e) {
       sendError.value = e instanceof Error ? 'Invalid headers: ' + e.message : 'Invalid headers: ' + String(e)
       sendLoading.value = false
@@ -456,6 +468,7 @@ watch([showHeadersModal, selectedService, selectedMethod, activeProfile], async 
       if (json && json.trim() !== '') {
         perRequestHeadersJson.value = json;
       } else if (serverHeaders.value.length > 0) {
+        // Show server headers as default if no per-request headers
         perRequestHeadersJson.value = JSON.stringify(
           serverHeaders.value.map(h => ({ [h.key]: h.value })),
           null,
@@ -479,6 +492,16 @@ watch([showHeadersModal, selectedService, selectedMethod, activeProfile], async 
     }
   }
 });
+
+function onPreviewUpdate(newCommand: string) {
+  // Extract the -d '...' JSON from the command
+  const match = newCommand.match(/-d\s+'([^']+)'/)
+  if (!match) return
+  try {
+    const json = JSON.parse(match[1])
+    requestData.value = json
+  } catch {}
+}
 </script>
 
 <template>
@@ -552,6 +575,7 @@ watch([showHeadersModal, selectedService, selectedMethod, activeProfile], async 
       :show="showPreviewModal"
       :previewGrpcurlCommand="previewGrpcurlCommand"
       @close="showPreviewModal = false"
+      @update="onPreviewUpdate"
     />
     <HeadersModal
       v-if="showHeadersModal"

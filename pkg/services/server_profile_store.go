@@ -73,7 +73,6 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 
 func initializeSchema(db *sqlx.DB) error {
 	schema := `
-	DROP TABLE IF EXISTS server_profiles;
 	CREATE TABLE IF NOT EXISTS server_profiles (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -97,7 +96,6 @@ func initializeSchema(db *sqlx.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_proto_paths_profile ON proto_paths(server_profile_id);
 
-	DROP TABLE IF EXISTS proto_definitions;
 	CREATE TABLE IF NOT EXISTS proto_definitions (
 		id TEXT PRIMARY KEY,
 		file_path TEXT NOT NULL,
