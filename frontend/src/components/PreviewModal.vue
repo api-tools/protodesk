@@ -46,6 +46,10 @@ function handleUpdate() {
         v-model="editedCommand"
         class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-xs text-white focus:outline-none w-full font-mono"
         style="font-size: 0.75rem; line-height: 1.2; height: 120px; resize: none;"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
       ></textarea>
       <div v-if="error" class="bg-red-700 text-white mt-2 p-2 rounded">{{ error }}</div>
       <div class="flex justify-end gap-2 mt-4">

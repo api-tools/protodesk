@@ -62,6 +62,11 @@ function collapseMessageField(name: string) {
             class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] mb-2"
             :value="modelValue && modelValue[field.name]"
             @input="updateField(field.name, ($event.target && ($event.target as HTMLInputElement).value) || '')"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            inputmode="none"
           />
           <input
             v-else
@@ -69,6 +74,9 @@ function collapseMessageField(name: string) {
             class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] mb-2"
             :value="modelValue && modelValue[field.name]"
             @input="updateField(field.name, ($event.target && ($event.target as HTMLInputElement).value) || '')"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
           />
         </template>
         <template v-else-if="field.type === 'bool'">
@@ -109,6 +117,11 @@ function collapseMessageField(name: string) {
                   class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
                   :value="val"
                   @input="updateField(field.name, [...((modelValue && modelValue[field.name]) || []).slice(0, idx), ($event.target && ($event.target as HTMLInputElement).value) || '', ...((modelValue && modelValue[field.name]) || []).slice(idx + 1)])"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  inputmode="none"
                 />
                 <input
                   v-else
@@ -116,6 +129,9 @@ function collapseMessageField(name: string) {
                   class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
                   :value="val"
                   @input="updateField(field.name, [...((modelValue && modelValue[field.name]) || []).slice(0, idx), ($event.target && ($event.target as HTMLInputElement).value) || '', ...((modelValue && modelValue[field.name]) || []).slice(idx + 1)])"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
                 />
                 <button type="button" class="ml-2 flex items-center justify-center rounded-full w-5 h-5 bg-red-600 text-white" @click="removeRepeatedField(field.name, idx)">
                   &times;

@@ -401,13 +401,13 @@ watch(
         <div class="flex flex-row gap-8">
           <!-- Left column: Server data fields -->
           <form class="flex flex-col gap-3 flex-1 min-w-0">
-            <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
-            <input v-model="modalProfile.host" type="text" placeholder="Host" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
-            <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
+            <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" autocorrect="off" autocapitalize="off" />
+            <input v-model="modalProfile.host" type="text" placeholder="Host" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" autocorrect="off" autocapitalize="off" />
+            <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" autocorrect="off" autocapitalize="off" />
             <label class="flex items-center gap-2 text-[0.8rem] text-[#b0bec5]">
               <input v-model="modalProfile.tlsEnabled" type="checkbox" class="text-[0.8rem] p-0 m-0" /> TLS Enabled
             </label>
-            <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
+            <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" autocorrect="off" autocapitalize="off" />
             <label class="flex items-center gap-2 text-[0.8rem] text-[#b0bec5]">
               <input v-model="modalProfile.useReflection" type="checkbox" class="text-[0.8rem] p-0 m-0" /> Use Reflection
             </label>
@@ -437,6 +437,8 @@ watch(
             class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none w-full font-mono"
             style="height: 120px; resize: none; font-size: 0.8rem; line-height: 1.2;"
             autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
             spellcheck="false"
             placeholder='[\n  { "key": "Authorization", "value": "token" }\n]'
           ></textarea>

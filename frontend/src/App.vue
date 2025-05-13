@@ -46,7 +46,9 @@ const expandedServices = ref<Record<string, boolean>>({})
 const requestData = ref<Record<string, any>>({})
 const responseData = ref<any>(null)
 const sendLoading = ref(false)
-const sendError = ref('')
+const sendError = ref<string | null>(null)
+const responseTime = ref<number | null>(null)
+const responseSize = ref<number | null>(null)
 const topLevelMessageExpanded = ref<Record<string, boolean>>({})
 const methodSearch = ref('')
 const leftWidth = ref(33.33)
@@ -337,6 +339,9 @@ async function handleSend() {
   sendLoading.value = true
   sendError.value = ''
   responseData.value = null
+  responseTime.value = null
+  responseSize.value = null
+  const startTime = performance.now()
   try {
     if (!activeProfile.value || !selectedService.value || !selectedMethod.value) {
       sendError.value = 'Missing profile, service, or method.'
@@ -378,6 +383,8 @@ async function handleSend() {
       headersJSON
     )
     responseData.value = resp
+    responseTime.value = Math.round(performance.now() - startTime)
+    responseSize.value = new TextEncoder().encode(JSON.stringify(resp)).length
   } catch (e) {
     sendError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -560,13 +567,15 @@ function onPreviewUpdate(newCommand: string) {
       </div>
       <div class="resize-handle" @mousedown="e => onDragStart('right', e)"></div>
       <!-- Right column: Response -->
-      <div :style="{ width: rightWidth + '%', boxSizing: 'border-box', background: '#232b36', padding: '16px', height: '100%', overflow: 'auto' }">
+      <div :style="{ width: rightWidth + '%', boxSizing: 'border-box', background: '#232b36', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }">
         <ResponseViewer
           :responseData="responseData"
           :sendLoading="sendLoading"
           :sendError="sendError ?? undefined"
           :selectedService="selectedService ?? undefined"
           :selectedMethod="selectedMethod ?? undefined"
+          :responseTime="responseTime ?? undefined"
+          :responseSize="responseSize ?? undefined"
         />
       </div>
     </div>

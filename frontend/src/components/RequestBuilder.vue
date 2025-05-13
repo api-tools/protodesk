@@ -53,6 +53,13 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
   if (!repeatedMessageExpanded.value[fieldName]) repeatedMessageExpanded.value[fieldName] = {}
   repeatedMessageExpanded.value[fieldName][idx] = !repeatedMessageExpanded.value[fieldName][idx]
 }
+
+function disableNativeAutofill(event: Event) {
+  const target = event.target as HTMLInputElement;
+  target.autocomplete = "off";
+  target.spellcheck = false;
+  target.classList.add('no-autofill');
+}
 </script>
 <template>
   <div style="width: 100%; height: 100%; font-size: 0.9rem; display: flex; flex-direction: column;">
@@ -103,15 +110,20 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
                   <input
                     v-else-if="field.type === 'string' || field.type === 'int32' || field.type === 'int64' || field.type === 'float' || field.type === 'double' || field.type === 'uint32' || field.type === 'uint64' || field.type === 'fixed32' || field.type === 'fixed64' || field.type === 'sfixed32' || field.type === 'sfixed64' || field.type === 'sint32' || field.type === 'sint64'"
                     :type="field.type === 'string' ? 'text' : 'number'"
-                    class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
+                    class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
                     v-model="props.requestData[field.name][idx]"
                     :placeholder="field.type"
                     autocomplete="off"
                     autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    inputmode="none"
+                    @focus="disableNativeAutofill"
+                    @input="disableNativeAutofill"
                   />
                   <select
                     v-else-if="field.type === 'enum' && field.enumValues && field.enumValues.length > 0"
-                    class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
+                    class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
                     v-model="props.requestData[field.name][idx]"
                     autocomplete="off"
                     autocorrect="off"
@@ -122,18 +134,21 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
                     v-else-if="field.type === 'bool'"
                     type="checkbox"
                     v-model="props.requestData[field.name][idx]"
-                    class="text-[0.8rem] p-0 m-0"
-                    autocomplete="off"
-                    autocorrect="off"
+                    class="text-[0.8rem] p-0 m-0 no-autofill"
                   />
                   <input
                     v-else-if="field.type === 'bytes'"
                     type="text"
-                    class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
+                    class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
                     v-model="props.requestData[field.name][idx]"
                     :placeholder="'base64 string'"
                     autocomplete="off"
                     autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    inputmode="none"
+                    @focus="disableNativeAutofill"
+                    @input="disableNativeAutofill"
                   />
                   <span v-else-if="field.type === 'group'" class="italic text-[#b0bec5]">Group fields are not supported (legacy protobuf feature).</span>
                   <span v-else-if="field.type !== 'message'" class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
@@ -150,15 +165,20 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
             <input
               v-if="field.type === 'string' || field.type === 'int32' || field.type === 'int64' || field.type === 'float' || field.type === 'double' || field.type === 'uint32' || field.type === 'uint64' || field.type === 'fixed32' || field.type === 'fixed64' || field.type === 'sfixed32' || field.type === 'sfixed64' || field.type === 'sint32' || field.type === 'sint64'"
               :type="field.type === 'string' ? 'text' : 'number'"
-              class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
+              class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
               v-model="props.requestData[field.name]"
               :placeholder="field.type"
               autocomplete="off"
               autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              inputmode="none"
+              @focus="disableNativeAutofill"
+              @input="disableNativeAutofill"
             />
             <select
               v-else-if="field.type === 'enum' && field.enumValues && field.enumValues.length > 0"
-              class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
+              class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
               v-model="props.requestData[field.name]"
               autocomplete="off"
               autocorrect="off"
@@ -166,17 +186,22 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
               <option v-for="ev in field.enumValues" :key="ev" :value="ev">{{ ev }}</option>
             </select>
             <div v-else-if="field.type === 'bool'" class="flex items-center gap-2 text-[0.8rem] text-[#b0bec5]">
-              <input type="checkbox" :id="'bool-' + field.name" v-model="props.requestData[field.name]" class="text-[0.8rem] p-0 m-0" />
+              <input type="checkbox" :id="'bool-' + field.name" v-model="props.requestData[field.name]" class="text-[0.8rem] p-0 m-0 no-autofill" />
               <label :for="'bool-' + field.name" class="select-none text-[#b0bec5]">{{ field.name }}</label>
             </div>
             <input
               v-else-if="field.type === 'bytes'"
               type="text"
-              class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem]"
+              class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
               v-model="props.requestData[field.name]"
               :placeholder="'base64 string'"
               autocomplete="off"
               autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              inputmode="none"
+              @focus="disableNativeAutofill"
+              @input="disableNativeAutofill"
             />
             <template v-else-if="field.type === 'message' && field.fields && field.fields.length > 0 && props.topLevelMessageExpanded[field.name]">
               <ProtoMessageField
@@ -228,4 +253,12 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
       </button>
     </div>
   </div>
-</template> 
+</template>
+
+<style>
+.no-autofill {
+  -webkit-user-modify: read-write-plaintext-only !important;
+  -webkit-autofill: off !important;
+  -webkit-text-fill-color: inherit !important;
+}
+</style> 

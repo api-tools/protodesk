@@ -40,6 +40,9 @@ function clearSearch() {
           placeholder="Search methods..."
           class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-xs text-white focus:outline-none w-full pr-6"
           style="min-width: 120px;"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
         />
         <button v-if="props.methodSearch" @click="clearSearch" class="absolute right-1 top-1/2 -translate-y-1/2 text-[#b0bec5] hover:text-white text-xs px-1 py-0.5 rounded focus:outline-none" style="background: none; border: none;">
           &times;
