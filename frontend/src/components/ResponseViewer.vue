@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, computed, ref } from 'vue'
+import { defineProps, computed, ref, watch } from 'vue'
 
 const props = defineProps<{
   responseData: any
@@ -13,6 +13,53 @@ const props = defineProps<{
 
 const searchQuery = ref('')
 const currentMatchIndex = ref(-1)
+const collapsedPaths = ref(new Set<string>())
+const copySuccess = ref(false)
+
+function findPathsWithMatch(value: any, query: string, currentPath: string = ''): string[] {
+  const paths: string[] = []
+  
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    if (String(value).toLowerCase().includes(query.toLowerCase())) {
+      paths.push(currentPath)
+    }
+  } else if (typeof value === 'string') {
+    if (value.toLowerCase().includes(query.toLowerCase())) {
+      paths.push(currentPath)
+    }
+  } else if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      const itemPaths = findPathsWithMatch(item, query, `${currentPath}[${index}]`)
+      if (itemPaths.length > 0) {
+        paths.push(currentPath, ...itemPaths)
+      }
+    })
+  } else if (typeof value === 'object') {
+    Object.entries(value).forEach(([key, val]) => {
+      if (key.toLowerCase().includes(query.toLowerCase())) {
+        paths.push(currentPath)
+      }
+      const valPaths = findPathsWithMatch(val, query, `${currentPath}.${key}`)
+      if (valPaths.length > 0) {
+        paths.push(currentPath, ...valPaths)
+      }
+    })
+  }
+  
+  return paths
+}
+
+function expandPathsWithMatches() {
+  if (!searchQuery.value || searchQuery.value.length < 2 || !props.responseData) return
+  
+  try {
+    const json = JSON.parse(props.responseData)
+    const paths = findPathsWithMatch(json, searchQuery.value)
+    paths.forEach(path => collapsedPaths.value.delete(path))
+  } catch (e) {
+    console.error('Error expanding paths:', e)
+  }
+}
 
 const searchResults = computed(() => {
   if (!searchQuery.value || searchQuery.value.length < 2 || !props.responseData) return { count: 0, matches: [] }
@@ -30,50 +77,91 @@ const searchResults = computed(() => {
   }
 })
 
-function syntaxHighlight(json: string): string {
-  if (!json) return ''
-  json = json
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  
-  let highlighted = json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, match => {
-    let style = ''
-    if (/^".*":$/.test(match)) {
-      // Key
-      style = 'color: #b0bec5;'
-    } else if (/^".*"$/.test(match)) {
-      // String value
-      style = 'color: #f5faff;'
-    } else if (/true|false/.test(match)) {
-      style = 'color: #f5faff;'
-    } else if (/null/.test(match)) {
-      style = 'color: #f5faff; font-style: italic;'
-    } else {
-      // Number
-      style = 'color: #f5faff;'
-    }
-    return `<span style="${style}">${match}</span>`
-  })
-
-  // Highlight search matches if search is active
+// Watch for changes in search query
+watch(searchQuery, () => {
   if (searchQuery.value && searchQuery.value.length >= 2) {
-    // Escape special regex characters but preserve whitespace and quotes
-    const escapedQuery = searchQuery.value
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/"/g, '\\"')
-    const regex = new RegExp(escapedQuery, 'gi')
-    highlighted = highlighted.replace(regex, match => `<span style="background-color: #42b983; color: #1b222c;">${match}</span>`)
+    expandPathsWithMatches()
   }
+})
 
-  return highlighted
+function toggleCollapse(path: string) {
+  if (collapsedPaths.value.has(path)) {
+    collapsedPaths.value.delete(path)
+  } else {
+    collapsedPaths.value.add(path)
+  }
+}
+
+function renderJsonValue(value: any, path: string = '', indent: number = 0): string {
+  const indentStr = '  '.repeat(indent)
+  
+  if (value === null) {
+    return '<span style="color: #f5faff; font-style: italic;">null</span>'
+  }
+  
+  if (typeof value === 'boolean') {
+    return `<span style="color: #f5faff;">${value}</span>`
+  }
+  
+  if (typeof value === 'number') {
+    return `<span style="color: #f5faff;">${value}</span>`
+  }
+  
+  if (typeof value === 'string') {
+    let content = value
+    if (searchQuery.value && searchQuery.value.length >= 2) {
+      const escapedQuery = searchQuery.value
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/"/g, '\\"')
+      const regex = new RegExp(escapedQuery, 'gi')
+      content = value.replace(regex, match => `<span style="background-color: #42b983; color: #1b222c;">${match}</span>`)
+    }
+    return `<span style="color: #f5faff;">"${content}"</span>`
+  }
+  
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return '[]'
+    }
+    const isCollapsed = collapsedPaths.value.has(path)
+    const icon = isCollapsed ? '+' : '-'
+    const style = `cursor: pointer; color: #42b983; margin-right: 4px; user-select: none; font-weight: bold;`
+    const items = value.map((item, index) => renderJsonValue(item, `${path}[${index}]`, indent + 1)).join(',\n' + indentStr + '  ')
+    return `<span class="collapsible" data-path="${path}" @click="toggleCollapse('${path}')" style="${style}">${icon}</span>[${isCollapsed ? '...' : `\n${indentStr}  ${items}\n${indentStr}`}]`
+  }
+  
+  if (typeof value === 'object') {
+    const entries = Object.entries(value)
+    if (entries.length === 0) {
+      return '{}'
+    }
+    const isCollapsed = collapsedPaths.value.has(path)
+    const icon = isCollapsed ? '+' : '-'
+    const style = `cursor: pointer; color: #42b983; margin-right: 4px; user-select: none; font-weight: bold;`
+    const items = entries
+      .map(([key, val]) => {
+        let keyContent = key
+        if (searchQuery.value && searchQuery.value.length >= 2) {
+          const escapedQuery = searchQuery.value
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            .replace(/"/g, '\\"')
+          const regex = new RegExp(escapedQuery, 'gi')
+          keyContent = key.replace(regex, match => `<span style="background-color: #42b983; color: #1b222c;">${match}</span>`)
+        }
+        return `${indentStr}  <span style="color: #b0bec5;">"${keyContent}"</span>: ${renderJsonValue(val, `${path}.${key}`, indent + 1)}`
+      })
+      .join(',\n')
+    return `<span class="collapsible" data-path="${path}" @click="toggleCollapse('${path}')" style="${style}">${icon}</span>{${isCollapsed ? '...' : `\n${items}\n${indentStr}`}}`
+  }
+  
+  return ''
 }
 
 const formattedResponse = computed(() => {
   if (!props.responseData) return ''
   try {
-    const json = JSON.stringify(JSON.parse(props.responseData), null, 2)
-    return syntaxHighlight(json)
+    const json = JSON.parse(props.responseData)
+    return renderJsonValue(json)
   } catch {
     return String(props.responseData)
   }
@@ -92,6 +180,11 @@ const disableNativeAutofill = () => {
 function clearSearch() {
   searchQuery.value = ''
   currentMatchIndex.value = -1
+  // Remove all selections
+  const highlightedElements = document.querySelectorAll('span[style*="background-color: #42b983"]')
+  highlightedElements.forEach(el => {
+    (el as HTMLElement).style.outline = 'none'
+  })
 }
 
 function cycleNextMatch() {
@@ -105,7 +198,15 @@ function cycleNextMatch() {
       if (highlightedElements[currentMatchIndex.value]) {
         const container = document.querySelector('.content-container')
         if (container) {
-          const targetElement = highlightedElements[currentMatchIndex.value]
+          const targetElement = highlightedElements[currentMatchIndex.value] as HTMLElement
+          // Remove previous selection
+          highlightedElements.forEach(el => {
+            (el as HTMLElement).style.outline = 'none'
+          })
+          // Add selection to current match
+          targetElement.style.outline = '2px solid #42b983'
+          targetElement.style.outlineOffset = '2px'
+          
           const containerRect = container.getBoundingClientRect()
           const targetRect = targetElement.getBoundingClientRect()
           const scrollTop = targetRect.top - containerRect.top - (containerRect.height / 2) + container.scrollTop
@@ -123,6 +224,34 @@ function handleKeyDown(event: KeyboardEvent) {
   if (event.key === 'Enter') {
     event.preventDefault()
     cycleNextMatch()
+  }
+}
+
+function handleCollapseClick(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (target.classList.contains('collapsible')) {
+    const path = target.getAttribute('data-path')
+    if (path) {
+      toggleCollapse(path)
+    }
+  }
+}
+
+async function copyToClipboard() {
+  if (!props.responseData) return
+  
+  try {
+    // If responseData is already an object, use it directly
+    const json = typeof props.responseData === 'string' 
+      ? JSON.parse(props.responseData) 
+      : props.responseData
+    await navigator.clipboard.writeText(JSON.stringify(json, null, 2))
+    copySuccess.value = true
+    setTimeout(() => {
+      copySuccess.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy:', err)
   }
 }
 </script>
@@ -176,8 +305,11 @@ function handleKeyDown(event: KeyboardEvent) {
     <!-- Scrollable content -->
     <div class="content-container" style="flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; margin-top: 64px;">
       <div v-if="props.sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ props.sendError }}</div>
-      <div v-if="!props.sendLoading && !props.sendError && props.responseData" class="bg-[#232b36] rounded p-2 font-mono text-xs whitespace-pre-wrap response-content" style="min-height: 120px; color: #b0bec5;">
-        <span v-html="formattedResponse"></span>
+      <div v-if="!props.sendLoading && !props.sendError && props.responseData" 
+           class="bg-[#232b36] rounded p-2 font-mono text-xs whitespace-pre-wrap response-content" 
+           style="min-height: 120px; color: #b0bec5;" 
+           v-html="formattedResponse" 
+           @click="handleCollapseClick">
       </div>
       <div v-else-if="!props.sendLoading && !props.sendError && !props.responseData" class="text-[#b0bec5] mt-2">
         No response yet. Click <span class="font-bold">Send</span> to make a request.
@@ -185,11 +317,29 @@ function handleKeyDown(event: KeyboardEvent) {
     </div>
 
     <!-- Status bar -->
-    <div style="height: 28px; min-height: 28px; max-height: 28px; background: #1b222c; border-top: 1px solid #2c3e50; display: flex; align-items: center; justify-content: flex-end; padding-left: 16px; padding-right: 8px; font-size: 0.8rem; flex-shrink: 0; color: #fff; margin: 0; gap: 8px;">
-      <template v-if="!props.sendLoading && !props.sendError && props.responseData">
-        <span class="text-[#b0bec5]">Response time: <span class="text-[#42b983]">{{ props.responseTime }}ms</span></span>
-        <span class="text-[#b0bec5]">Size: <span class="text-[#42b983]">{{ formattedSize }}</span></span>
-      </template>
+    <div style="height: 28px; min-height: 28px; max-height: 28px; background: #1b222c; border-top: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding-left: 16px; padding-right: 8px; font-size: 0.75rem; flex-shrink: 0; color: #fff; margin: 0; gap: 8px;">
+      <div class="flex items-center gap-2">
+        <template v-if="!props.sendLoading && !props.sendError && props.responseData">
+          <span class="text-[#b0bec5]">Response time: <span class="text-[#42b983]">{{ props.responseTime }}ms</span></span>
+          <span class="text-[#b0bec5]">Size: <span class="text-[#42b983]">{{ formattedSize }}</span></span>
+        </template>
+      </div>
+      <div class="flex items-center">
+        <button 
+          v-if="!props.sendLoading && !props.sendError && props.responseData"
+          @click="copyToClipboard"
+          class="text-[#42b983] hover:text-[#42b983] hover:opacity-80 transition-colors duration-200 p-1"
+          title="Copy response to clipboard"
+        >
+          <svg v-if="!copySuccess" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -199,5 +349,14 @@ function handleKeyDown(event: KeyboardEvent) {
   -webkit-user-modify: read-write-plaintext-only !important;
   -webkit-autofill: off !important;
   -webkit-text-fill-color: inherit !important;
+}
+
+.collapsible {
+  display: inline-block;
+  transition: transform 0.2s;
+}
+
+.collapsible:hover {
+  opacity: 0.8;
 }
 </style> 
