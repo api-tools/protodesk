@@ -135,31 +135,33 @@ function handleKeyDown(event: KeyboardEvent) {
       </div>
       <div class="flex items-center h-full gap-2">
         <div class="relative flex items-center">
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="Search in response..."
-            class="w-48 px-2 h-6 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.75rem] no-autofill"
-            :style="{ width: searchQuery ? '200px' : '160px' }"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-            inputmode="none"
-            @focus="disableNativeAutofill"
-            @input="disableNativeAutofill"
-            @keydown="handleKeyDown"
-          />
+          <div class="relative">
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="Search in response..."
+              class="w-48 px-2 h-6 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.75rem] no-autofill"
+              :style="{ width: searchQuery ? '200px' : '160px', paddingRight: searchQuery ? '24px' : '8px' }"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              inputmode="none"
+              @focus="disableNativeAutofill"
+              @input="disableNativeAutofill"
+              @keydown="handleKeyDown"
+            />
+            <button
+              v-if="searchQuery"
+              @click="clearSearch"
+              class="absolute right-1 top-1/2 transform -translate-y-1/2 text-[#b0bec5] hover:text-white focus:outline-none text-[0.75rem]"
+            >
+              ×
+            </button>
+          </div>
           <div v-if="searchQuery && searchQuery.length >= 2 && searchResults.count > 0" class="text-[#42b983] text-[0.75rem] ml-2">
             {{ currentMatchIndex + 1 }}/{{ searchResults.count }} matches
           </div>
-          <button
-            v-if="searchQuery"
-            @click="clearSearch"
-            class="text-[#b0bec5] hover:text-white focus:outline-none ml-2 text-[0.75rem]"
-          >
-            ×
-          </button>
         </div>
         <div v-if="props.sendLoading" class="flex items-center gap-2 text-[#42b983]">
           <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
