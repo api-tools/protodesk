@@ -67,10 +67,6 @@ const previewGrpcurlCommand = computed(() => {
   const headersObj = Array.isArray(headersArray)
     ? Object.fromEntries(headersArray.map(h => [h.key, h.value]))
     : headersArray
-  // TEMP DEBUG: Log headersObj to console
-  if (typeof window !== 'undefined') {
-    console.log('DEBUG: headersObj for previewGrpcurlCommand:', headersObj)
-  }
   const headerFlags = Object.entries(headersObj)
     .map(([k, v]) => `-H '${k}: ${v}'`)
     .join(' ')
@@ -88,7 +84,6 @@ const previewGrpcurlCommand = computed(() => {
   const tlsFlag = activeProfile.value.tlsEnabled ? '' : '-plaintext'
   const certFlag = activeProfile.value.certificatePath ? `-cacert '${activeProfile.value.certificatePath}'` : ''
   const serviceMethod = `${selectedService.value}/${selectedMethod.value}`
-  // Always include headerFlags, even if empty (for debug)
   return `grpcurl ${tlsFlag} ${certFlag} ${headerFlags} ${dataFlag} ${address} ${serviceMethod}`.replace(/ +/g, ' ').trim()
 })
 
