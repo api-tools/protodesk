@@ -62,7 +62,7 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
         <h2 class="font-bold text-white whitespace-nowrap">Request</h2>
         <div class="flex items-center gap-2 w-full">
           <div class="flex-1"></div>
-          <button v-if="props.selectedService && props.selectedMethod" class="px-2 py-0.5 bg-[#42b983] text-white rounded font-bold hover:bg-[#369870] transition ml-4 text-xs" @click="$emit('send')" style="margin-left:auto; min-height: 28px; font-size: 0.75rem;">
+          <button v-if="props.selectedService && props.selectedMethod" class="px-2 py-0.5 bg-[#42b983] text-white rounded hover:bg-[#369870] transition ml-4" @click="$emit('send')" style="margin-left:auto; min-height: 28px; font-size: 0.8rem;">
             Send
           </button>
         </div>
@@ -73,7 +73,7 @@ function toggleRepeatedMessageField(fieldName: string, idx: number) {
       <form v-if="props.selectedService && props.selectedMethod && props.fields.length > 0" @submit.prevent>
         <div v-for="field in props.fields" :key="field.name" class="mb-3">
           <div class="flex items-center justify-between mb-1">
-            <label class="block text-white font-semibold">{{ field.name }} <span class="text-[#42b983]">({{ field.type }}<span v-if="field.isRepeated">[]</span>)</span></label>
+            <label class="block text-white font-normal">{{ field.name }} <span class="text-[#42b983]">({{ field.type }}<span v-if="field.isRepeated">[]</span>)</span></label>
             <button v-if="field.isRepeated" type="button" class="text-[#42b983] hover:text-[#369870] flex items-center justify-center rounded-full w-5 h-5" style="border: none; background: none; padding: 0;" @click="$emit('addRepeatedField', field.name)">
               <span aria-label="Add" title="Add"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="#42b983" stroke-width="2" fill="none"/><line x1="10" y1="6" x2="10" y2="14" stroke="#42b983" stroke-width="2"/><line x1="6" y1="10" x2="14" y2="10" stroke="#42b983" stroke-width="2"/></svg></span>
             </button>

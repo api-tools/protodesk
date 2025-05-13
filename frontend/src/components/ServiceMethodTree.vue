@@ -66,12 +66,12 @@ function clearSearch() {
               <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M7 6l5 4-5 4" stroke="#b0bec5" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </span>
           </span>
-          <span class="font-semibold text-white cursor-pointer" @click="handleToggleService(service.name)">{{ service.name }}</span>
+          <span class="font-normal text-white cursor-pointer" @click="handleToggleService(service.name)">{{ service.name }}</span>
         </div>
         <transition name="fade">
           <div v-show="expandedServices[service.name]" class="ml-5 mt-1 space-y-1">
             <div v-for="method in service.methods as Array<{ name: string }>" :key="method.name"
-                 class="px-2 py-1 rounded cursor-pointer text-[#b0bec5] hover:bg-[#2c3e50] hover:text-white"
+                 class="px-2 py-1 rounded cursor-pointer text-[#8a94a0] hover:bg-[#2c3e50] hover:text-white"
                  :class="{ 'bg-[#2c3e50] text-white': selectedService === service.name && selectedMethod === method.name }"
                  @click.stop="handleSelectMethod(service.name, method.name)">
               {{ method.name }}

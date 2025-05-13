@@ -387,65 +387,65 @@ watch(
           </option>
         </select>
       </div>
-      <button class="ml-2 bg-[#42b983] text-[#222] rounded px-3 py-1 font-bold hover:bg-[#369870] transition" @click="openAdd">＋ Add Server</button>
+      <button class="ml-2 px-2 py-0.5 bg-[#42b983] text-white rounded hover:bg-[#369870] transition" @click="openAdd">＋ Add Server</button>
       <button v-if="profileStore.activeProfile?.id" class="text-[#42b983] underline hover:text-[#369870] px-2" @click="openEdit(profiles.find(p => p.id === profileStore.activeProfile?.id))">Edit</button>
       <button v-if="profileStore.activeProfile?.id" class="text-[#42b983] underline hover:text-[#369870] px-2" @click="handleDeleteClick">Delete</button>
       <!-- Debug: manual reload button (optional, can remove if not needed) -->
     </div>
     <!-- Modal -->
     <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div class="bg-white text-[#222] rounded-lg shadow-lg p-6 w-full max-w-3xl text-[0.8rem] relative">
+      <div class="bg-[#29323b] text-white rounded-lg shadow-lg p-6 w-full max-w-3xl text-[0.8rem] relative">
         <!-- Close (cross) button -->
-        <button class="absolute top-2 right-4 text-xl text-gray-400 hover:text-gray-700 font-bold" @click="showModal = false">&times;</button>
+        <button class="absolute top-2 right-4 text-xl text-gray-400 hover:text-gray-700" @click="showModal = false">&times;</button>
         <h3 class="text-lg font-bold mb-4">{{ isEdit ? 'Edit' : 'Add' }} Server Profile</h3>
         <div class="flex flex-row gap-8">
           <!-- Left column: Server data fields -->
           <form class="flex flex-col gap-3 flex-1 min-w-0">
-            <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
-            <input v-model="modalProfile.host" type="text" placeholder="Host" required class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
-            <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
-            <label class="flex items-center gap-2 text-[0.8rem]">
+            <input v-model="modalProfile.name" type="text" placeholder="Profile Name" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
+            <input v-model="modalProfile.host" type="text" placeholder="Host" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
+            <input v-model.number="modalProfile.port" type="number" placeholder="Port" min="1" required class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
+            <label class="flex items-center gap-2 text-[0.8rem] text-[#b0bec5]">
               <input v-model="modalProfile.tlsEnabled" type="checkbox" class="text-[0.8rem] p-0 m-0" /> TLS Enabled
             </label>
-            <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="border border-[#2c3e50] rounded px-2 py-1 text-[0.8rem]" autocomplete="off" />
-            <label class="flex items-center gap-2 text-[0.8rem]">
+            <input v-model="modalProfile.certificatePath" type="text" placeholder="Certificate Path (optional)" class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none text-[0.8rem]" autocomplete="off" />
+            <label class="flex items-center gap-2 text-[0.8rem] text-[#b0bec5]">
               <input v-model="modalProfile.useReflection" type="checkbox" class="text-[0.8rem] p-0 m-0" /> Use Reflection
             </label>
           </form>
           <!-- Right column: Proto folders and files -->
           <div class="flex flex-col flex-1 min-w-0">
-            <h4 class="font-semibold mb-2">Proto Folders</h4>
-            <div class="border rounded bg-white text-[#222] overflow-y-auto mb-2" style="height: 180px;">
+            <h4 class="font-semibold mb-2 text-[#b0bec5]">Proto Folders</h4>
+            <div class="border border-[#2c3e50] rounded bg-[#232b36] text-white overflow-y-auto mb-2" style="height: 180px;">
               <div v-for="folder in protoFolders" :key="folder"
                 class="px-3 py-1 cursor-pointer select-none"
-                :class="{ 'bg-[#42b983] text-white': selectedProtoFolder === folder, 'hover:bg-gray-100': selectedProtoFolder !== folder }"
+                :class="{ 'bg-[#42b983] text-white': selectedProtoFolder === folder, 'hover:bg-[#374151]': selectedProtoFolder !== folder }"
                 @click="selectProtoFolder(folder)"
               >
                 {{ folder }}
               </div>
             </div>
             <div class="flex gap-2">
-              <button class="bg-[#42b983] text-white rounded px-3 py-1 font-bold hover:bg-[#369870] transition self-start" @click="addProtoFolder">Add proto path</button>
-              <button class="bg-red-500 text-white rounded px-3 py-1 font-bold hover:bg-red-700 transition self-start disabled:opacity-50" :disabled="!selectedProtoFolder" @click="removeSelectedProtoFolder">Remove path</button>
+              <button class="bg-[#42b983] text-white rounded px-3 py-1 hover:bg-[#369870] transition self-start" @click="addProtoFolder">Add proto path</button>
+              <button class="bg-red-500 text-white rounded px-3 py-1 hover:bg-red-700 transition self-start disabled:opacity-50" :disabled="!selectedProtoFolder" @click="removeSelectedProtoFolder">Remove path</button>
             </div>
           </div>
         </div>
         <div class="mt-6">
-          <label class="font-semibold mb-2 block">Array of headers in JSON format</label>
+          <label class="font-semibold mb-2 block text-[#b0bec5]">Array of headers in JSON format</label>
           <textarea
             v-model="headersJson"
-            class="w-full px-2 py-1 rounded border border-[#2c3e50] text-[0.8rem] font-mono"
+            class="bg-[#232b36] border border-[#2c3e50] rounded px-2 py-1 text-white focus:outline-none w-full font-mono"
             style="height: 120px; resize: none; font-size: 0.8rem; line-height: 1.2;"
             autocomplete="off"
             spellcheck="false"
             placeholder='[\n  { "key": "Authorization", "value": "token" }\n]'
           ></textarea>
-          <div v-if="headersJsonError" class="text-red-500 text-xs mt-1">{{ headersJsonError }}</div>
+          <div v-if="headersJsonError" class="bg-red-700 text-white mt-2 p-2 rounded">{{ headersJsonError }}</div>
         </div>
-        <hr class="my-4 border-t border-gray-300 w-full" />
+        <hr class="my-4 border-t border-[#2c3e50] w-full" />
         <div class="flex gap-2 mt-2 justify-start">
-          <button type="button" class="bg-gray-400 text-white rounded px-4 py-1 font-bold hover:bg-gray-600 transition" @click="showModal = false">Cancel</button>
-          <button type="button" class="bg-[#42b983] text-white rounded px-4 py-1 font-bold hover:bg-[#369870] transition" @click="saveProfile">Save</button>
+          <button type="button" class="bg-[#374151] text-white rounded px-4 py-1 hover:bg-[#232b36] transition" @click="showModal = false">Cancel</button>
+          <button type="button" class="bg-[#42b983] text-white rounded px-4 py-1 hover:bg-[#369870] transition" @click="saveProfile">Save</button>
         </div>
         <!-- Info Modal for proto file parsing results -->
         <ConfirmModal
