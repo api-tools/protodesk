@@ -79,6 +79,9 @@ const searchResults = computed(() => {
 
 // Watch for changes in search query
 watch(searchQuery, () => {
+  // Reset the current match index when search query changes
+  currentMatchIndex.value = -1
+  
   if (searchQuery.value && searchQuery.value.length >= 2) {
     expandPathsWithMatches()
   }
