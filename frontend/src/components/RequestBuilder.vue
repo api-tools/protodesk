@@ -253,7 +253,7 @@ function disableNativeAutofill(event: Event) {
       </button>
     </div>
   </div>
-</template>
+</template> 
 
 <style>
 .no-autofill {

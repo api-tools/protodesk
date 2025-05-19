@@ -147,7 +147,7 @@ function renderJsonValue(value: any, path: string = '', indent: number = 0): str
             .replace(/"/g, '\\"')
           const regex = new RegExp(escapedQuery, 'gi')
           keyContent = key.replace(regex, match => `<span style="background-color: #42b983; color: #1b222c;">${match}</span>`)
-        }
+    }
         return `${indentStr}  <span style="color: #b0bec5;">"${keyContent}"</span>: ${renderJsonValue(val, `${path}.${key}`, indent + 1)}`
       })
       .join(',\n')
@@ -181,9 +181,9 @@ function clearSearch() {
   searchQuery.value = ''
   currentMatchIndex.value = -1
   // Remove all selections
-  const highlightedElements = document.querySelectorAll('span[style*="background-color: #42b983"]')
+  const highlightedElements = document.querySelectorAll('span[style*="background-color"]')
   highlightedElements.forEach(el => {
-    (el as HTMLElement).style.outline = 'none'
+    (el as HTMLElement).style.backgroundColor = ''
   })
 }
 
@@ -194,21 +194,58 @@ function cycleNextMatch() {
   if (matchIndex !== undefined) {
     const element = document.querySelector('.response-content')
     if (element) {
-      const highlightedElements = element.querySelectorAll('span[style*="background-color: #42b983"]')
-      if (highlightedElements[currentMatchIndex.value]) {
+      // Get all text nodes that contain our search query
+      const walker = document.createTreeWalker(
+        element,
+        NodeFilter.SHOW_TEXT,
+        null
+      )
+      
+      let node: Text | null
+      let currentIndex = 0
+      let targetNode: Text | null = null
+      
+      while ((node = walker.nextNode() as Text)) {
+        const text = node.textContent || ''
+        const escapedQuery = searchQuery.value
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/"/g, '\\"')
+        const regex = new RegExp(escapedQuery, 'gi')
+        const matches = [...text.matchAll(regex)]
+        
+        for (const match of matches) {
+          if (currentIndex === currentMatchIndex.value) {
+            targetNode = node
+            break
+          }
+          currentIndex++
+        }
+        
+        if (targetNode) break
+      }
+      
+      if (targetNode) {
         const container = document.querySelector('.content-container')
         if (container) {
-          const targetElement = highlightedElements[currentMatchIndex.value] as HTMLElement
           // Remove previous selection
-          highlightedElements.forEach(el => {
-            (el as HTMLElement).style.outline = 'none'
+          const previousSelections = element.querySelectorAll('.current-match')
+          previousSelections.forEach(el => {
+            el.classList.remove('current-match')
           })
-          // Add selection to current match
-          targetElement.style.outline = '2px solid #42b983'
-          targetElement.style.outlineOffset = '2px'
           
+          // Create a span around the match
+          const range = document.createRange()
+          const startPos = targetNode.textContent?.toLowerCase().indexOf(searchQuery.value.toLowerCase()) || 0
+          range.setStart(targetNode, startPos)
+          range.setEnd(targetNode, startPos + searchQuery.value.length)
+          
+          const span = document.createElement('span')
+          span.className = 'current-match'
+          range.surroundContents(span)
+          
+          // Scroll to the match
           const containerRect = container.getBoundingClientRect()
-          const targetRect = targetElement.getBoundingClientRect()
+          const targetRect = span.getBoundingClientRect()
           const scrollTop = targetRect.top - containerRect.top - (containerRect.height / 2) + container.scrollTop
           container.scrollTo({
             top: scrollTop,
@@ -223,7 +260,13 @@ function cycleNextMatch() {
 function handleKeyDown(event: KeyboardEvent) {
   if (event.key === 'Enter') {
     event.preventDefault()
-    cycleNextMatch()
+    if (searchQuery.value && searchQuery.value.length >= 2) {
+      if (currentMatchIndex.value === -1) {
+        // First Enter press - start from the first match
+        currentMatchIndex.value = 0
+      }
+      cycleNextMatch()
+    }
   }
 }
 
@@ -260,8 +303,8 @@ async function copyToClipboard() {
     <!-- Fixed header -->
     <div style="height: 64px; min-height: 64px; max-height: 64px; background: #232b36; border-bottom: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; position: absolute; top: 0; left: 0; right: 0; z-index: 10;">
       <div class="flex items-center h-full">
-        <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
-      </div>
+      <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
+    </div>
       <div class="flex items-center h-full gap-2">
         <div class="relative flex items-center">
           <div class="relative">
@@ -304,15 +347,15 @@ async function copyToClipboard() {
 
     <!-- Scrollable content -->
     <div class="content-container" style="flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; margin-top: 64px;">
-      <div v-if="props.sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ props.sendError }}</div>
+    <div v-if="props.sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ props.sendError }}</div>
       <div v-if="!props.sendLoading && !props.sendError && props.responseData" 
            class="bg-[#232b36] rounded p-2 font-mono text-xs whitespace-pre-wrap response-content" 
            style="min-height: 120px; color: #b0bec5;" 
            v-html="formattedResponse" 
            @click="handleCollapseClick">
-      </div>
-      <div v-else-if="!props.sendLoading && !props.sendError && !props.responseData" class="text-[#b0bec5] mt-2">
-        No response yet. Click <span class="font-bold">Send</span> to make a request.
+    </div>
+    <div v-else-if="!props.sendLoading && !props.sendError && !props.responseData" class="text-[#b0bec5] mt-2">
+      No response yet. Click <span class="font-bold">Send</span> to make a request.
       </div>
     </div>
 
@@ -342,7 +385,7 @@ async function copyToClipboard() {
       </div>
     </div>
   </div>
-</template>
+</template> 
 
 <style>
 .no-autofill {
@@ -358,5 +401,12 @@ async function copyToClipboard() {
 
 .collapsible:hover {
   opacity: 0.8;
+}
+
+.current-match {
+  outline: 2px solid #42b983 !important;
+  outline-offset: 2px !important;
+  background-color: #42b983 !important;
+  color: #1b222c !important;
 }
 </style> 
