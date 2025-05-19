@@ -264,8 +264,66 @@ function handleKeyDown(event: KeyboardEvent) {
       if (currentMatchIndex.value === -1) {
         // First Enter press - start from the first match
         currentMatchIndex.value = 0
+        // Find and highlight the first match without cycling
+        const element = document.querySelector('.response-content')
+        if (element) {
+          const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+            null
+          )
+          
+          let node: Text | null
+          let currentIndex = 0
+          let targetNode: Text | null = null
+          
+          while ((node = walker.nextNode() as Text)) {
+            const text = node.textContent || ''
+            const escapedQuery = searchQuery.value
+              .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              .replace(/"/g, '\\"')
+            const regex = new RegExp(escapedQuery, 'gi')
+            const matches = [...text.matchAll(regex)]
+            
+            if (matches.length > 0) {
+              targetNode = node
+              break
+            }
+          }
+          
+          if (targetNode) {
+            const container = document.querySelector('.content-container')
+            if (container) {
+              // Remove previous selection
+              const previousSelections = element.querySelectorAll('.current-match')
+              previousSelections.forEach(el => {
+                el.classList.remove('current-match')
+              })
+              
+              // Create a span around the match
+              const range = document.createRange()
+              const startPos = targetNode.textContent?.toLowerCase().indexOf(searchQuery.value.toLowerCase()) || 0
+              range.setStart(targetNode, startPos)
+              range.setEnd(targetNode, startPos + searchQuery.value.length)
+              
+              const span = document.createElement('span')
+              span.className = 'current-match'
+              range.surroundContents(span)
+              
+              // Scroll to the match
+              const containerRect = container.getBoundingClientRect()
+              const targetRect = span.getBoundingClientRect()
+              const scrollTop = targetRect.top - containerRect.top - (containerRect.height / 2) + container.scrollTop
+              container.scrollTo({
+                top: scrollTop,
+                behavior: 'smooth'
+              })
+            }
+          }
+        }
+      } else {
+        cycleNextMatch()
       }
-      cycleNextMatch()
     }
   }
 }
