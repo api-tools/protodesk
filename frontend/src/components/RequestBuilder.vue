@@ -62,19 +62,21 @@ function disableNativeAutofill(event: Event) {
 }
 </script>
 <template>
-  <div style="width: 100%; height: 100%; font-size: 0.9rem; display: flex; flex-direction: column;">
-    <!-- Main scrollable content -->
-    <div style="flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px;">
-      <div class="column-header flex items-center justify-between mb-2">
+  <div style="width: 100%; height: 100%; display: flex; flex-direction: column; position: relative;">
+    <!-- Fixed header -->
+    <div style="height: 64px; min-height: 64px; max-height: 64px; background: #232b36; border-bottom: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; position: absolute; top: 0; left: 0; right: 0; z-index: 1;">
+      <div class="flex items-center h-full">
         <h2 class="font-bold text-white whitespace-nowrap">Request</h2>
-        <div class="flex items-center gap-2 w-full">
-          <div class="flex-1"></div>
-          <button v-if="props.selectedService && props.selectedMethod" class="px-2 py-0.5 bg-[#42b983] text-white rounded hover:bg-[#369870] transition ml-4" @click="$emit('send')" style="margin-left:auto; min-height: 28px; font-size: 0.8rem;">
-            Send
-          </button>
-        </div>
       </div>
-      <hr class="border-t border-[#2c3e50] mb-3" />
+      <div class="flex items-center h-full gap-2">
+        <button v-if="props.selectedService && props.selectedMethod" class="px-2 py-0.5 bg-[#42b983] text-white rounded hover:bg-[#369870] transition" @click="$emit('send')" style="min-height: 28px; font-size: 0.8rem;">
+          Send
+        </button>
+      </div>
+    </div>
+
+    <!-- Scrollable content -->
+    <div class="content-container" style="flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; margin-top: 64px;">
       <div v-if="props.inputFieldsLoading" class="bg-blue-900 text-blue-200 rounded p-2 mb-2">Loading request fields...</div>
       <div v-if="props.inputFieldsError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ props.inputFieldsError }}</div>
       <form v-if="props.selectedService && props.selectedMethod && props.fields.length > 0" @submit.prevent>
@@ -222,35 +224,39 @@ function disableNativeAutofill(event: Event) {
       <!-- Per-request headers modal and preview modal as in HomeView.vue -->
       <!-- ... (omitted for brevity, but should match your previous implementation) ... -->
     </div>
-    <!-- Status bar as a separate sibling node -->
-    <div style="height: 28px; min-height: 28px; max-height: 28px; background: #1b222c; border-top: 1px solid #2c3e50; display: flex; align-items: center; justify-content: flex-end; padding-left: 16px; padding-right: 8px; font-size: 0.85rem; flex-shrink: 0; color: #fff; margin: 0; gap: 8px;">
-      <button
-        v-if="props.selectedService && props.selectedMethod"
-        @click="$emit('setShowHeadersModal', true)"
-        style="background: none; border: none; padding: 0; margin: 0; display: flex; align-items: center; cursor: pointer; color: #b0bec5;"
-        title="Edit headers"
-        aria-label="Edit headers"
-      >
-        <!-- Sliders/settings icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24">
-          <circle cx="6" cy="12" r="2" stroke="#42b983" stroke-width="2"/>
-          <circle cx="12" cy="6" r="2" stroke="#42b983" stroke-width="2"/>
-          <circle cx="18" cy="18" r="2" stroke="#42b983" stroke-width="2"/>
-          <path stroke="#42b983" stroke-width="2" d="M6 4v6m0 4v6M12 4v2m0 4v12M18 4v12m0 4v0"/>
-        </svg>
-      </button>
-      <button
-        v-if="props.selectedService && props.selectedMethod"
-        @click="$emit('setShowPreviewModal', true)"
-        style="background: none; border: none; padding: 0; margin-left: 0; display: flex; align-items: center; cursor: pointer; color: #b0bec5;"
-        title="Preview grpcurl command"
-        aria-label="Preview grpcurl command"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24">
-          <path stroke="#42b983" stroke-width="2" d="M1.5 12S5.5 5.5 12 5.5 22.5 12 22.5 12 18.5 18.5 12 18.5 1.5 12 1.5 12Z"/>
-          <circle cx="12" cy="12" r="3.5" stroke="#42b983" stroke-width="2"/>
-        </svg>
-      </button>
+
+    <!-- Status bar -->
+    <div style="height: 28px; min-height: 28px; max-height: 28px; background: #1b222c; border-top: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding-left: 16px; padding-right: 8px; font-size: 0.75rem; flex-shrink: 0; color: #fff; margin: 0; gap: 8px;">
+      <div></div>
+      <div class="flex items-center gap-2">
+        <button
+          v-if="props.selectedService && props.selectedMethod"
+          @click="$emit('setShowHeadersModal', true)"
+          style="background: none; border: none; padding: 0; margin: 0; display: flex; align-items: center; cursor: pointer; color: #b0bec5;"
+          title="Edit headers"
+          aria-label="Edit headers"
+        >
+          <!-- Sliders/settings icon -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24">
+            <circle cx="6" cy="12" r="2" stroke="#42b983" stroke-width="2"/>
+            <circle cx="12" cy="6" r="2" stroke="#42b983" stroke-width="2"/>
+            <circle cx="18" cy="18" r="2" stroke="#42b983" stroke-width="2"/>
+            <path stroke="#42b983" stroke-width="2" d="M6 4v6m0 4v6M12 4v2m0 4v12M18 4v12m0 4v0"/>
+          </svg>
+        </button>
+        <button
+          v-if="props.selectedService && props.selectedMethod"
+          @click="$emit('setShowPreviewModal', true)"
+          style="background: none; border: none; padding: 0; margin-left: 0; display: flex; align-items: center; cursor: pointer; color: #b0bec5;"
+          title="Preview grpcurl command"
+          aria-label="Preview grpcurl command"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24">
+            <path stroke="#42b983" stroke-width="2" d="M1.5 12S5.5 5.5 12 5.5 22.5 12 22.5 12 18.5 18.5 12 18.5 1.5 12 1.5 12Z"/>
+            <circle cx="12" cy="12" r="3.5" stroke="#42b983" stroke-width="2"/>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 </template> 
