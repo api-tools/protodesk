@@ -362,7 +362,7 @@ async function copyToClipboard() {
 <template>
   <div style="width: 100%; height: 100%; display: flex; flex-direction: column; position: relative;">
     <!-- Fixed header -->
-    <div style="height: 64px; min-height: 64px; max-height: 64px; background: #232b36; border-bottom: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; position: absolute; top: 0; left: 0; right: 0; z-index: 10;">
+    <div style="height: 64px; min-height: 64px; max-height: 64px; background: #232b36; border-bottom: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; position: absolute; top: 0; left: 0; right: 0; z-index: 1;">
       <div class="flex items-center h-full">
       <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
     </div>

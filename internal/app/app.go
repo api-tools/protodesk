@@ -155,11 +155,11 @@ func (a *App) DeleteProtoDefinition(id string) error {
 	return a.profileManager.GetStore().DeleteProtoDefinition(a.ctx, id)
 }
 
-// ProtoFileImport represents a proto file found in a folder
-// to be returned to the frontend
+// ProtoFileImport represents a proto file to be imported
 type ProtoFileImport struct {
-	FilePath string `json:"filePath"`
-	Content  string `json:"content"`
+	FilePath       string `json:"filePath"`
+	Content        string `json:"content"`
+	SelectedFolder string `json:"selectedFolder"`
 }
 
 // ImportProtoFilesFromFolder opens a folder picker, recursively finds all .proto files, and returns their paths and contents
@@ -177,19 +177,35 @@ func (a *App) ImportProtoFilesFromFolder() ([]ProtoFileImport, error) {
 	if folder == "" {
 		return nil, nil // user cancelled
 	}
+
+	// Get the absolute path
+	absPath, err := filepath.Abs(folder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path: %w", err)
+	}
+	fmt.Printf("[DEBUG] Selected folder: %s\n", absPath)
+
 	var results []ProtoFileImport
-	err = filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+		// Skip node_modules directory
+		if info.IsDir() && info.Name() == "node_modules" {
+			fmt.Printf("[DEBUG] Skipping node_modules directory: %s\n", path)
+			return filepath.SkipDir
+		}
 		if !info.IsDir() && filepath.Ext(path) == ".proto" {
+			fmt.Printf("[DEBUG] Found proto file: %s\n", path)
 			content, readErr := os.ReadFile(path)
 			if readErr != nil {
 				return readErr
 			}
+			// Store the absolute path and selected folder
 			results = append(results, ProtoFileImport{
-				FilePath: path,
-				Content:  string(content),
+				FilePath:       path,
+				Content:        string(content),
+				SelectedFolder: absPath,
 			})
 		}
 		return nil
@@ -197,6 +213,7 @@ func (a *App) ImportProtoFilesFromFolder() ([]ProtoFileImport, error) {
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[DEBUG] Total proto files found: %d\n", len(results))
 	return results, nil
 }
 
@@ -215,48 +232,109 @@ func (a *App) SelectProtoFolder() (string, error) {
 }
 
 // ScanAndParseProtoPath scans a proto path, parses all .proto files, and stores results in the DB
-func (a *App) ScanAndParseProtoPath(serverID, protoPathID, path string) ([]*proto.ProtoDefinition, error) {
-	parser := proto.NewParser([]string{path})
-	var results []*proto.ProtoDefinition
-	err := filepath.Walk(path, func(file string, info os.FileInfo, err error) error {
+func (a *App) ScanAndParseProtoPath(serverProfileId string, protoPathId string, path string) error {
+	if a.ctx == nil {
+		return fmt.Errorf("context not initialized")
+	}
+
+	// Get the absolute path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+	fmt.Printf("[DEBUG] Scanning proto path: %s\n", absPath)
+
+	// Create a parser with the root proto directory as the import path
+	parser := proto.NewParser([]string{absPath})
+
+	// Recursively collect all .proto files from the specified path
+	var protoFiles []string
+	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || filepath.Ext(file) != ".proto" {
-			return nil
+		// Skip node_modules directory
+		if info.IsDir() && info.Name() == "node_modules" {
+			fmt.Printf("[DEBUG] Skipping node_modules directory: %s\n", path)
+			return filepath.SkipDir
 		}
-		content, readErr := os.ReadFile(file)
-		if readErr != nil {
-			return readErr
+		if !info.IsDir() && filepath.Ext(path) == ".proto" {
+			fmt.Printf("[DEBUG] Found proto file: %s\n", path)
+			protoFiles = append(protoFiles, path)
 		}
-		pd := proto.NewProtoDefinition(file, string(content))
-		pd.ServerProfileID = serverID
-		pd.ProtoPathID = protoPathID
-		pd.LastParsed = time.Now()
-		// Try to parse
-		parsed, parseErr := parser.ParseFile(file)
-		if parseErr != nil {
-			pd.Error = parseErr.Error()
-		} else {
-			pd.Imports = parsed.Imports
-			pd.Services = parsed.Services
-			pd.Error = ""
-		}
-		// Save or update in DB
-		existing, _ := a.profileManager.GetStore().GetProtoDefinition(a.ctx, pd.ID)
-		if existing != nil {
-			_ = a.profileManager.GetStore().UpdateProtoDefinition(a.ctx, pd)
-		} else {
-			pd.ID = uuid.New().String()
-			_ = a.profileManager.GetStore().CreateProtoDefinition(a.ctx, pd)
-		}
-		results = append(results, pd)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to walk proto directory: %w", err)
 	}
-	return results, nil
+	fmt.Printf("[DEBUG] Total proto files to parse: %d\n", len(protoFiles))
+
+	// Parse each proto file
+	for _, protoFile := range protoFiles {
+		fmt.Printf("[DEBUG] Parsing proto file: %s\n", protoFile)
+		content, err := os.ReadFile(protoFile)
+		if err != nil {
+			return fmt.Errorf("failed to read proto file %s: %w", protoFile, err)
+		}
+
+		// Get the relative path from the selected folder
+		relPath, err := filepath.Rel(absPath, protoFile)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path for %s: %w", protoFile, err)
+		}
+
+		// Parse the proto file directly from its original location
+		fileDesc, err := parser.ParseFile(protoFile)
+		if err != nil {
+			return fmt.Errorf("failed to parse proto file %s: %w", protoFile, err)
+		}
+
+		// Store the proto definition in the database
+		def := &proto.ProtoDefinition{
+			ID:              uuid.New().String(),
+			FilePath:        relPath,
+			Content:         string(content),
+			Imports:         fileDesc.Imports,
+			Services:        fileDesc.Services,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+			ServerProfileID: serverProfileId,
+		}
+
+		// Check if a proto definition with the same path already exists
+		existingDefs, err := a.profileManager.GetStore().ListProtoDefinitionsByProfile(a.ctx, serverProfileId)
+		if err != nil {
+			return fmt.Errorf("failed to list proto definitions: %w", err)
+		}
+
+		var existingDef *proto.ProtoDefinition
+		for _, d := range existingDefs {
+			if d.FilePath == relPath {
+				existingDef = d
+				break
+			}
+		}
+
+		if existingDef != nil {
+			// Update existing definition
+			def.ID = existingDef.ID
+			def.CreatedAt = existingDef.CreatedAt
+			err = a.profileManager.GetStore().UpdateProtoDefinition(a.ctx, def)
+			if err != nil {
+				return fmt.Errorf("failed to update proto definition: %w", err)
+			}
+			fmt.Printf("[DEBUG] Updated existing proto definition: %s\n", relPath)
+		} else {
+			// Create new definition
+			err = a.profileManager.GetStore().CreateProtoDefinition(a.ctx, def)
+			if err != nil {
+				return fmt.Errorf("failed to create proto definition: %w", err)
+			}
+			fmt.Printf("[DEBUG] Created new proto definition: %s\n", relPath)
+		}
+	}
+
+	return nil
 }
 
 // CreateProtoPath creates a proto path record in the database and links it to a server profile

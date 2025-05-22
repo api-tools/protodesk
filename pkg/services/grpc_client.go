@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"time"
 
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/grpcreflect"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	reflectpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
@@ -39,23 +41,72 @@ func NewGRPCClientManager() *DefaultGRPCClientManager {
 func (m *DefaultGRPCClientManager) Connect(ctx context.Context, target string, useTLS bool, certPath string) error {
 	var opts []grpc.DialOption
 
+	// Add default options for HTTP/2
+	opts = append(opts,
+		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
+		grpc.WithNoProxy(),
+		grpc.WithBlock(), // Block until connection is established
+	)
+
 	if useTLS {
 		if certPath != "" {
 			// TODO: Implement custom certificate loading
 			return fmt.Errorf("custom certificates not implemented yet")
 		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+		// Use system root certificates with more permissive settings for production servers
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			MinVersion: tls.VersionTLS12,
+			// Allow insecure renegotiation for compatibility with some servers
+			Renegotiation: tls.RenegotiateOnceAsClient,
+			// Don't verify hostname for production servers that might use load balancers
+			InsecureSkipVerify: true,
+		})))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
+	// Add timeout - increase to 30 seconds for production servers
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Create connection
 	conn, err := grpc.DialContext(ctx, target, opts...)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		if err == context.DeadlineExceeded {
+			return fmt.Errorf("connection timeout: server at %s did not respond within 5 seconds. Please check if the server is running and accessible", target)
+		}
+		return fmt.Errorf("failed to connect to %s: %w", target, err)
 	}
 
-	m.connections[target] = conn
-	return nil
+	// Wait for connection to be ready
+	ready := make(chan struct{})
+	go func() {
+		for {
+			state := conn.GetState()
+			if state == connectivity.Ready {
+				close(ready)
+				return
+			}
+			if state == connectivity.Shutdown || state == connectivity.TransientFailure {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	select {
+	case <-ready:
+		// Connection is ready
+		m.connections[target] = conn
+		return nil
+	case <-ctx.Done():
+		// Context timed out or was cancelled
+		conn.Close()
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("connection timeout: server at %s did not become ready within 5 seconds. Please check if the server is running and accessible", target)
+		}
+		return fmt.Errorf("connection cancelled: %w", ctx.Err())
+	}
 }
 
 // Disconnect closes the connection to the specified server

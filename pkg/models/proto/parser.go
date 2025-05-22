@@ -151,43 +151,49 @@ func (p *Parser) parseProtoFile(filePath string, content []byte) (protoreflect.F
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Copy all .proto files from the main proto's directory into tmpDir
-	mainDir := filepath.Dir(filePath)
-	files, err := ioutil.ReadDir(mainDir)
-	if err == nil {
-		for _, f := range files {
-			if !f.IsDir() && filepath.Ext(f.Name()) == ".proto" {
-				src := filepath.Join(mainDir, f.Name())
-				dst := filepath.Join(tmpDir, f.Name())
-				data, err := ioutil.ReadFile(src)
-				if err == nil {
-					_ = ioutil.WriteFile(dst, data, 0644)
-				}
-			}
-		}
-	}
+	// Get the base directory of the proto file
+	baseDir := filepath.Dir(filePath)
 
-	// Also copy .proto files from user-supplied import paths (if not already present)
+	// Copy all .proto files from all import paths into tmpDir
 	for _, importPath := range p.importPaths {
-		importFiles, err := ioutil.ReadDir(importPath)
-		if err == nil {
-			for _, f := range importFiles {
-				if !f.IsDir() && filepath.Ext(f.Name()) == ".proto" {
-					dst := filepath.Join(tmpDir, f.Name())
-					if _, err := os.Stat(dst); os.IsNotExist(err) {
-						src := filepath.Join(importPath, f.Name())
-						data, err := ioutil.ReadFile(src)
-						if err == nil {
-							_ = ioutil.WriteFile(dst, data, 0644)
-						}
-					}
+		err = filepath.Walk(importPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() && filepath.Ext(path) == ".proto" {
+				// Calculate relative path from import path
+				relPath, err := filepath.Rel(importPath, path)
+				if err != nil {
+					return err
+				}
+				// Create the same directory structure in tmpDir
+				dst := filepath.Join(tmpDir, relPath)
+				dstDir := filepath.Dir(dst)
+				if err := os.MkdirAll(dstDir, 0755); err != nil {
+					return err
+				}
+				// Copy the file
+				data, err := ioutil.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				if err := ioutil.WriteFile(dst, data, 0644); err != nil {
+					return err
 				}
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to copy proto files from %s: %w", importPath, err)
 		}
 	}
 
 	// Write the main proto file content (overwrites if already copied)
-	tmpFile := filepath.Join(tmpDir, filepath.Base(filePath))
+	relPath, err := filepath.Rel(baseDir, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relative path: %w", err)
+	}
+	tmpFile := filepath.Join(tmpDir, relPath)
 	if err := ioutil.WriteFile(tmpFile, content, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
@@ -209,22 +215,25 @@ func (p *Parser) parseProtoFile(filePath string, content []byte) (protoreflect.F
 
 	// Prepare protoc command
 	args := []string{
-		"--proto_path=" + tmpDir,
+		"--proto_path=" + baseDir,            // Add the base directory as the first import path
+		"--proto_path=" + tmpDir,             // Add the temp directory
 		"--proto_path=" + wellKnownTypesPath, // Well-known types include path
 		"--descriptor_set_out=" + filepath.Join(tmpDir, "descriptor.pb"),
 		"--include_imports",
-		tmpFile,
 	}
 
-	// Add user-supplied import paths
+	// Add all import paths
 	for _, path := range p.importPaths {
 		args = append(args, "--proto_path="+path)
 	}
 
+	// Add the main proto file
+	args = append(args, tmpFile)
+
 	// Run protoc and surface errors clearly
 	cmd := exec.Command("protoc", args...)
-	// Set working directory to the temp directory so all imports are available
-	cmd.Dir = tmpDir
+	// Set working directory to the base directory so all imports are available
+	cmd.Dir = baseDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("protoc failed (output: %s): %w", string(output), err)
 	}
@@ -247,8 +256,8 @@ func (p *Parser) parseProtoFile(filePath string, content []byte) (protoreflect.F
 		return nil, fmt.Errorf("failed to create file registry: %w", err)
 	}
 
-	// Find the target file in the registry (use base name)
-	fileDesc, err := registry.FindFileByPath(filepath.Base(filePath))
+	// Find the target file in the registry (use relative path)
+	fileDesc, err := registry.FindFileByPath(relPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find file in registry: %w.\nIf this is an import issue, check your import paths and well-known types include path.", err)
 	}

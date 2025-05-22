@@ -48,7 +48,7 @@ export function SavePerRequestHeaders(arg1:string,arg2:string,arg3:string,arg4:s
 
 export function SaveProtoDefinition(arg1:proto.ProtoDefinition):Promise<void>;
 
-export function ScanAndParseProtoPath(arg1:string,arg2:string,arg3:string):Promise<Array<proto.ProtoDefinition>>;
+export function ScanAndParseProtoPath(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SelectProtoFolder():Promise<string>;
 

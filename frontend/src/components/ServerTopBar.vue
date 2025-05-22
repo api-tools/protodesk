@@ -304,13 +304,22 @@ async function addProtoFolder() {
     showInfoModal.value = true;
     return;
   }
-  // Get the folder path from the first file (all files are from the same folder)
-  const folderPath = files[0].filePath.substring(0, files[0].filePath.lastIndexOf('/'));
-  if (!protoFolders.value.includes(folderPath)) {
+  
+  // Get the selected folder path from the first file
+  const folderPath = files[0].selectedFolder;
+  
+  // Check if this folder or any of its parent folders are already in the list
+  const isDuplicate = protoFolders.value.some(existingPath => 
+    folderPath.startsWith(existingPath) || existingPath.startsWith(folderPath)
+  );
+  if (!isDuplicate) {
     protoFolders.value.push(folderPath);
     // Simulate parse: just count files and show modal, do not save to backend
     const okCount = files.length;
     infoModalMessage.value = `Found ${files.length} proto files in folder.`;
+    showInfoModal.value = true;
+  } else {
+    infoModalMessage.value = 'This folder or one of its parent folders is already in the list.';
     showInfoModal.value = true;
   }
 }
