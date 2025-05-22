@@ -135,26 +135,34 @@ func (m *DefaultGRPCClientManager) ListServicesAndMethods(conn *grpc.ClientConn)
 	rc := grpcreflect.NewClient(ctx, reflectpb.NewServerReflectionClient(conn))
 	defer rc.Reset()
 
+	fmt.Println("[ListServicesAndMethods] Starting reflection client")
 	services, err := rc.ListServices()
 	if err != nil {
+		fmt.Printf("[ListServicesAndMethods] Failed to list services: %v\n", err)
 		return nil, fmt.Errorf("reflection not supported or failed: %w", err)
 	}
 
+	fmt.Printf("[ListServicesAndMethods] Found %d services\n", len(services))
 	result := make(map[string][]string)
 	for _, svc := range services {
 		if svc == "grpc.reflection.v1alpha.ServerReflection" {
+			fmt.Println("[ListServicesAndMethods] Skipping reflection service")
 			continue
 		}
+		fmt.Printf("[ListServicesAndMethods] Resolving service: %s\n", svc)
 		svcDesc, err := rc.ResolveService(svc)
 		if err != nil {
+			fmt.Printf("[ListServicesAndMethods] Failed to resolve service %s: %v\n", svc, err)
 			continue // skip services we can't resolve
 		}
 		var methods []string
 		for _, m := range svcDesc.GetMethods() {
 			methods = append(methods, m.GetName())
 		}
+		fmt.Printf("[ListServicesAndMethods] Found %d methods for service %s\n", len(methods), svc)
 		result[svc] = methods
 	}
+	fmt.Printf("[ListServicesAndMethods] Returning %d services\n", len(result))
 	return result, nil
 }
 

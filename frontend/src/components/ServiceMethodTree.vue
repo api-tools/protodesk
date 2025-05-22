@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { defineProps, defineEmits } from 'vue'
 
-const props = defineProps({
-  services: { type: Array, required: true },
-  expandedServices: { type: Object, required: true },
-  selectedService: { type: String, default: null },
-  selectedMethod: { type: String, default: null },
-  connectionLoading: { type: Boolean, default: false },
-  connectionError: { type: String, default: null },
-  reflectionError: { type: String, default: null },
-  methodSearch: { type: String, required: true },
-})
+const props = defineProps<{
+  services: any[]
+  expandedServices: Record<string, boolean>
+  selectedService?: string
+  selectedMethod?: string
+  connectionLoading: boolean
+  servicesLoading: boolean
+  connectionError?: string
+  reflectionError?: string
+  methodSearch: string
+}>()
 
 const emit = defineEmits(['toggleService', 'selectMethod', 'update:methodSearch'])
 
@@ -50,13 +51,31 @@ function clearSearch() {
       </div>
     </div>
     <hr class="border-t border-[#2c3e50] mb-3" />
-    <div v-if="connectionLoading" class="bg-blue-900 text-blue-200 rounded p-2 mb-2">Connecting to server...</div>
-    <div v-if="connectionError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ connectionError }}</div>
-    <div v-if="reflectionError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ reflectionError }}</div>
-    <div v-if="services.length === 0 && !connectionLoading" class="bg-[#29323b] rounded p-4 text-[#b0bec5] mt-2">
-      No proto services found for this server.
+
+    <!-- Loading states -->
+    <div v-if="connectionLoading || servicesLoading" class="flex items-center justify-center h-full">
+      <div class="flex flex-col items-center gap-2">
+        <svg class="animate-spin h-8 w-8 text-[#42b983]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="text-[#42b983] text-sm">
+          {{ connectionLoading ? 'Connecting to server...' : 'Loading services...' }}
+        </span>
+      </div>
     </div>
-    <div v-else-if="!connectionLoading" class="mt-2 space-y-2 overflow-y-auto">
+
+    <!-- Error states -->
+    <div v-else-if="connectionError || reflectionError" class="flex items-center justify-center h-full">
+      <div class="flex flex-col items-center gap-2">
+        <span class="text-red-500 text-sm">
+          {{ connectionError || reflectionError }}
+        </span>
+      </div>
+    </div>
+
+    <!-- Services list -->
+    <div v-else class="mt-2 space-y-2 overflow-y-auto">
       <div v-for="service in services as Array<{ name: string, methods: Array<{ name: string }> }>" :key="service.name" class="">
         <div class="flex items-center select-none">
           <span class="mr-1 cursor-pointer flex items-center" @click.stop="handleToggleService(service.name)">
@@ -84,4 +103,16 @@ function clearSearch() {
       </div>
     </div>
   </div>
-</template> 
+</template>
+
+<style>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style> 

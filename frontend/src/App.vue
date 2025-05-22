@@ -90,11 +90,14 @@ const previewGrpcurlCommand = computed(() => {
 // --- Add allServices computed property ---
 const allServices = computed(() => {
   if (reflectionServices.value) {
+    console.log('Building services from reflection:', reflectionServices.value)
     // Reflection: build [{ name, methods: [{ name }] }]
-    return Object.entries(reflectionServices.value).map(([svc, methods]) => ({
+    const services = Object.entries(reflectionServices.value).map(([svc, methods]) => ({
       name: svc,
       methods: methods.map(m => ({ name: m }))
     }))
+    console.log('Built services:', services)
+    return services
   }
   // Fallback: aggregate from protoDefinitions
   const result: { name: string, methods: any[] }[] = []
@@ -162,10 +165,88 @@ function initializeRequestData(fields: Field[]): Record<string, any> {
   return data;
 }
 
+// Add new refs for loading states
+const servicesLoading = ref(false)
+const requestBuilderLoading = ref(false)
+const responseLoading = ref(false)
+
+// Add function to clear all states
+function clearAllStates() {
+  selectedService.value = null
+  selectedMethod.value = null
+  reflectionServices.value = null
+  protoDefinitions.value = []
+  reflectionError.value = null
+  connectionError.value = null
+  requestData.value = {}
+  responseData.value = null
+  sendError.value = null
+  responseTime.value = null
+  responseSize.value = null
+  expandedServices.value = {}
+  topLevelMessageExpanded.value = {}
+  reflectionInputFields.value = []
+  perRequestHeaders.value = []
+  perRequestHeadersJson.value = ''
+}
+
+// Modify fetchServicesAndMethods to handle loading states
+async function fetchServicesAndMethods() {
+  if (!activeProfile.value) {
+    clearAllStates()
+    connectionLoading.value = false
+    servicesLoading.value = false
+    return
+  }
+
+  // Clear previous states
+  clearAllStates()
+  
+  if (activeProfile.value.useReflection) {
+    connectionLoading.value = true
+    servicesLoading.value = true
+    connectionError.value = null
+    try {
+      console.log('Connecting to server:', activeProfile.value.id)
+      await ConnectToServer(activeProfile.value.id)
+      connectionLoading.value = false
+      try {
+        console.log('Fetching services via reflection')
+        const result = await ListServerServices(activeProfile.value.id)
+        console.log('Reflection services:', result)
+        reflectionServices.value = result
+        reflectionError.value = null
+      } catch (e) {
+        console.error('Reflection failed:', e)
+        reflectionServices.value = null
+        reflectionError.value = (typeof e === 'object' && e && 'message' in e) ? (e as any).message : String(e) || 'Reflection failed.'
+      }
+    } catch (e) {
+      console.error('Connection failed:', e)
+      connectionLoading.value = false
+      connectionError.value = (typeof e === 'object' && e && 'message' in e) ? (e as any).message : String(e) || 'Failed to connect to server.'
+      reflectionServices.value = null
+      reflectionError.value = null
+    } finally {
+      servicesLoading.value = false
+    }
+  } else {
+    servicesLoading.value = true
+    await fetchProtoDefinitions()
+    reflectionServices.value = null
+    reflectionError.value = null
+    connectionError.value = null
+    connectionLoading.value = false
+    servicesLoading.value = false
+  }
+}
+
+// Modify selectMethod to handle loading states
 async function selectMethod(serviceName: string, methodName: string) {
   selectedService.value = serviceName
   selectedMethod.value = methodName
   topLevelMessageExpanded.value = {}
+  requestBuilderLoading.value = true
   let fields = []
   if (activeProfile.value && activeProfile.value.useReflection) {
     try {
@@ -189,149 +270,13 @@ async function selectMethod(serviceName: string, methodName: string) {
   }
   reflectionInputFields.value = fields
   requestData.value = initializeRequestData(fields)
+  requestBuilderLoading.value = false
 }
 
-function onDragStart(which: 'left' | 'right', e: MouseEvent) {
-  dragging = which
-  startX = e.clientX
-  startLeft = leftWidth.value
-  startMiddle = middleWidth.value
-  startRight = rightWidth.value
-  document.body.style.cursor = 'col-resize'
-  e.preventDefault()
-}
-function onDrag(e: MouseEvent) {
-  if (!dragging) return
-  const dx = e.clientX - startX
-  if (dragging === 'left') {
-    let newLeft = startLeft + (dx / window.innerWidth) * 100
-    let newMiddle = startMiddle - (dx / window.innerWidth) * 100
-    if (newLeft < 10) { newLeft = 10; newMiddle = startLeft + startMiddle - 10 }
-    if (newMiddle < 10) { newMiddle = 10; newLeft = startLeft + startMiddle - 10 }
-    leftWidth.value = newLeft
-    middleWidth.value = newMiddle
-  } else if (dragging === 'right') {
-    let newMiddle = startMiddle + (dx / window.innerWidth) * 100
-    let newRight = startRight - (dx / window.innerWidth) * 100
-    if (newMiddle < 10) { newMiddle = 10; newRight = startMiddle + startRight - 10 }
-    if (newRight < 10) { newRight = 10; newMiddle = startMiddle + startRight - 10 }
-    middleWidth.value = newMiddle
-    rightWidth.value = newRight
-  }
-}
-function onDragEnd() {
-  dragging = null
-  document.body.style.cursor = ''
-}
-onMounted(() => {
-  profileStore.loadProfiles()
-  window.addEventListener('mousemove', onDrag)
-  window.addEventListener('mouseup', onDragEnd)
-})
-onUnmounted(() => {
-  window.removeEventListener('mousemove', onDrag)
-  window.removeEventListener('mouseup', onDragEnd)
-})
-
-// --- Add fetchServicesAndMethods and watcher on activeProfile ---
-async function fetchProtoDefinitions() {
-  if (!activeProfile.value) {
-    protoDefinitions.value = []
-    return
-  }
-  try {
-    const defs = await ListProtoDefinitionsByProfile(activeProfile.value.id)
-    protoDefinitions.value = defs || []
-  } catch (e) {
-    protoDefinitions.value = []
-  }
-}
-
-async function fetchServicesAndMethods() {
-  if (!activeProfile.value) {
-    reflectionServices.value = null
-    protoDefinitions.value = []
-    reflectionError.value = null
-    connectionError.value = null
-    connectionLoading.value = false
-    return
-  }
-  if (activeProfile.value.useReflection) {
-    connectionLoading.value = true
-    connectionError.value = null
-    try {
-      await ConnectToServer(activeProfile.value.id)
-      connectionLoading.value = false
-      try {
-        const result = await ListServerServices(activeProfile.value.id)
-        reflectionServices.value = result
-        reflectionError.value = null
-      } catch (e) {
-        reflectionServices.value = null
-        reflectionError.value = (typeof e === 'object' && e && 'message' in e) ? (e as any).message : String(e) || 'Reflection failed.'
-      }
-    } catch (e) {
-      connectionLoading.value = false
-      connectionError.value = (typeof e === 'object' && e && 'message' in e) ? (e as any).message : String(e) || 'Failed to connect to server.'
-      reflectionServices.value = null
-      reflectionError.value = null
-    }
-  } else {
-    await fetchProtoDefinitions()
-    reflectionServices.value = null
-    reflectionError.value = null
-    connectionError.value = null
-    connectionLoading.value = false
-  }
-}
-
-watch(activeProfile, fetchServicesAndMethods, { immediate: true })
-
-// Optionally, you may want to update connectionStatus based on your app logic
-
-function addRepeatedField(fieldName: string) {
-  if (!Array.isArray(requestData.value[fieldName])) {
-    requestData.value[fieldName] = []
-  }
-  requestData.value[fieldName].push('')
-}
-function removeRepeatedField(fieldName: string, idx: number) {
-  if (Array.isArray(requestData.value[fieldName])) {
-    requestData.value[fieldName].splice(idx, 1)
-  }
-}
-function toggleTopLevelMessageField(name: string) {
-  topLevelMessageExpanded.value[name] = !topLevelMessageExpanded.value[name]
-}
-function fixRequestDataForProto(data: any, fields: any[]): any {
-  const result: any = Array.isArray(data) ? [] : {};
-  for (const field of fields) {
-    const value = data[field.name];
-    if (field.isRepeated && Array.isArray(value)) {
-      result[field.name] = value.map((v: any) =>
-        field.type === 'message' && field.fields
-          ? fixRequestDataForProto(v, field.fields)
-          : fixSingleFieldValue(v, field)
-      );
-    } else if (field.type === 'message' && field.fields) {
-      result[field.name] = value ? fixRequestDataForProto(value, field.fields) : null;
-    } else {
-      result[field.name] = fixSingleFieldValue(value, field);
-    }
-  }
-  return result;
-}
-function fixSingleFieldValue(value: any, field: any) {
-  if ([
-    'int32', 'int64', 'float', 'double', 'uint32', 'uint64',
-    'fixed32', 'fixed64', 'sfixed32', 'sfixed64', 'sint32', 'sint64'
-  ].includes(field.type)) {
-    return value === '' ? null : value;
-  }
-  return value;
-}
+// Modify handleSend to handle loading states
 async function handleSend() {
   sendLoading.value = true
+  responseLoading.value = true
   sendError.value = ''
   responseData.value = null
   responseTime.value = null
@@ -340,7 +285,6 @@ async function handleSend() {
   try {
     if (!activeProfile.value || !selectedService.value || !selectedMethod.value) {
       sendError.value = 'Missing profile, service, or method.'
-      sendLoading.value = false
       return
     }
     // Prepare request data
@@ -353,7 +297,6 @@ async function handleSend() {
       requestJSON = JSON.stringify(fixedRequestData)
     } catch (e) {
       sendError.value = e instanceof Error ? 'Invalid request data: ' + e.message : 'Invalid request data: ' + String(e)
-      sendLoading.value = false
       return
     }
     // Merge headers and convert to object
@@ -366,7 +309,6 @@ async function handleSend() {
       headersJSON = JSON.stringify(headersObj)
     } catch (e) {
       sendError.value = e instanceof Error ? 'Invalid headers: ' + e.message : 'Invalid headers: ' + String(e)
-      sendLoading.value = false
       return
     }
     // Call backend
@@ -384,8 +326,10 @@ async function handleSend() {
     sendError.value = e instanceof Error ? e.message : String(e)
   } finally {
     sendLoading.value = false
+    responseLoading.value = false
   }
 }
+
 function openHeadersModal() {}
 async function savePerRequestHeaders() {
   // Validate JSON
@@ -504,6 +448,115 @@ function onPreviewUpdate(newCommand: string) {
     requestData.value = json
   } catch {}
 }
+
+// Add back the missing functions
+function fixRequestDataForProto(data: any, fields: any[]): any {
+  const result: any = Array.isArray(data) ? [] : {};
+  for (const field of fields) {
+    const value = data[field.name];
+    if (field.isRepeated && Array.isArray(value)) {
+      result[field.name] = value.map((v: any) =>
+        field.type === 'message' && field.fields
+          ? fixRequestDataForProto(v, field.fields)
+          : fixSingleFieldValue(v, field)
+      );
+    } else if (field.type === 'message' && field.fields) {
+      result[field.name] = value ? fixRequestDataForProto(value, field.fields) : null;
+    } else {
+      result[field.name] = fixSingleFieldValue(value, field);
+    }
+  }
+  return result;
+}
+
+function fixSingleFieldValue(value: any, field: any) {
+  if ([
+    'int32', 'int64', 'float', 'double', 'uint32', 'uint64',
+    'fixed32', 'fixed64', 'sfixed32', 'sfixed64', 'sint32', 'sint64'
+  ].includes(field.type)) {
+    return value === '' ? null : value;
+  }
+  return value;
+}
+
+async function fetchProtoDefinitions() {
+  if (!activeProfile.value) {
+    protoDefinitions.value = []
+    return
+  }
+  try {
+    const defs = await ListProtoDefinitionsByProfile(activeProfile.value.id)
+    protoDefinitions.value = defs || []
+  } catch (e) {
+    protoDefinitions.value = []
+  }
+}
+
+function addRepeatedField(fieldName: string) {
+  if (!Array.isArray(requestData.value[fieldName])) {
+    requestData.value[fieldName] = []
+  }
+  requestData.value[fieldName].push('')
+}
+
+function removeRepeatedField(fieldName: string, idx: number) {
+  if (Array.isArray(requestData.value[fieldName])) {
+    requestData.value[fieldName].splice(idx, 1)
+  }
+}
+
+function toggleTopLevelMessageField(name: string) {
+  topLevelMessageExpanded.value[name] = !topLevelMessageExpanded.value[name]
+}
+
+function onDragStart(which: 'left' | 'right', e: MouseEvent) {
+  dragging = which
+  startX = e.clientX
+  startLeft = leftWidth.value
+  startMiddle = middleWidth.value
+  startRight = rightWidth.value
+  document.body.style.cursor = 'col-resize'
+  e.preventDefault()
+}
+
+function onDrag(e: MouseEvent) {
+  if (!dragging) return
+  const dx = e.clientX - startX
+  if (dragging === 'left') {
+    let newLeft = startLeft + (dx / window.innerWidth) * 100
+    let newMiddle = startMiddle - (dx / window.innerWidth) * 100
+    if (newLeft < 10) { newLeft = 10; newMiddle = startLeft + startMiddle - 10 }
+    if (newMiddle < 10) { newMiddle = 10; newLeft = startLeft + startMiddle - 10 }
+    leftWidth.value = newLeft
+    middleWidth.value = newMiddle
+  } else if (dragging === 'right') {
+    let newMiddle = startMiddle + (dx / window.innerWidth) * 100
+    let newRight = startRight - (dx / window.innerWidth) * 100
+    if (newMiddle < 10) { newMiddle = 10; newRight = startMiddle + startRight - 10 }
+    if (newRight < 10) { newRight = 10; newMiddle = startMiddle + startRight - 10 }
+    middleWidth.value = newMiddle
+    rightWidth.value = newRight
+  }
+}
+
+function onDragEnd() {
+  dragging = null
+  document.body.style.cursor = ''
+}
+
+onMounted(() => {
+  profileStore.loadProfiles()
+  window.addEventListener('mousemove', onDrag)
+  window.addEventListener('mouseup', onDragEnd)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onDrag)
+  window.removeEventListener('mouseup', onDragEnd)
+})
+
+// Add back the watcher
+watch(activeProfile, fetchServicesAndMethods, { immediate: true })
 </script>
 
 <template>
@@ -519,6 +572,7 @@ function onPreviewUpdate(newCommand: string) {
           :selectedService="selectedService ?? undefined"
           :selectedMethod="selectedMethod ?? undefined"
           :connectionLoading="connectionLoading"
+          :servicesLoading="servicesLoading"
           :connectionError="connectionError ?? undefined"
           :reflectionError="reflectionError ?? undefined"
           v-model:methodSearch="methodSearch"
@@ -532,7 +586,7 @@ function onPreviewUpdate(newCommand: string) {
         <RequestBuilder
           :fields="fields"
           :requestData="requestData"
-          :inputFieldsLoading="inputFieldsLoading"
+          :inputFieldsLoading="inputFieldsLoading || requestBuilderLoading"
           :inputFieldsError="inputFieldsError ?? undefined"
           :topLevelMessageExpanded="topLevelMessageExpanded"
           :selectedService="selectedService ?? undefined"
@@ -566,6 +620,7 @@ function onPreviewUpdate(newCommand: string) {
         <ResponseViewer
           :responseData="responseData"
           :sendLoading="sendLoading"
+          :responseLoading="responseLoading"
           :sendError="sendError ?? undefined"
           :selectedService="selectedService ?? undefined"
           :selectedMethod="selectedMethod ?? undefined"

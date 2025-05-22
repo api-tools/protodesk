@@ -54,7 +54,10 @@ func (m *ServerProfileManager) Connect(ctx context.Context, profileID string) er
 		certPath = *profile.CertificatePath
 	}
 
-	if err := m.grpcClient.Connect(ctx, target, profile.TLSEnabled, certPath); err != nil {
+	// Automatically enable TLS for port 443
+	useTLS := profile.TLSEnabled || profile.Port == 443
+
+	if err := m.grpcClient.Connect(ctx, target, useTLS, certPath); err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 

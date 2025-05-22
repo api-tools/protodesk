@@ -4,6 +4,7 @@ import { defineProps, computed, ref, watch } from 'vue'
 const props = defineProps<{
   responseData: any
   sendLoading: boolean
+  responseLoading: boolean
   sendError?: string
   selectedService?: string
   selectedMethod?: string
@@ -150,7 +151,7 @@ function renderJsonValue(value: any, path: string = '', indent: number = 0): str
             .replace(/"/g, '\\"')
           const regex = new RegExp(escapedQuery, 'gi')
           keyContent = key.replace(regex, match => `<span style="background-color: #42b983; color: #1b222c;">${match}</span>`)
-    }
+        }
         return `${indentStr}  <span style="color: #b0bec5;">"${keyContent}"</span>: ${renderJsonValue(val, `${path}.${key}`, indent + 1)}`
       })
       .join(',\n')
@@ -364,8 +365,8 @@ async function copyToClipboard() {
     <!-- Fixed header -->
     <div style="height: 64px; min-height: 64px; max-height: 64px; background: #232b36; border-bottom: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; position: absolute; top: 0; left: 0; right: 0; z-index: 1;">
       <div class="flex items-center h-full">
-      <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
-    </div>
+        <h2 class="font-bold text-white whitespace-nowrap">Response</h2>
+      </div>
       <div class="flex items-center h-full gap-2">
         <div class="relative flex items-center">
           <div class="relative">
@@ -396,7 +397,7 @@ async function copyToClipboard() {
             {{ currentMatchIndex + 1 }}/{{ searchResults.count }} matches
           </div>
         </div>
-        <div v-if="props.sendLoading" class="flex items-center gap-2 text-[#42b983]">
+        <div v-if="props.sendLoading || props.responseLoading" class="flex items-center gap-2 text-[#42b983]">
           <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -408,29 +409,29 @@ async function copyToClipboard() {
 
     <!-- Scrollable content -->
     <div class="content-container" style="flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; margin-top: 64px;">
-    <div v-if="props.sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ props.sendError }}</div>
-      <div v-if="!props.sendLoading && !props.sendError && props.responseData" 
+      <div v-if="props.sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ props.sendError }}</div>
+      <div v-if="!props.sendLoading && !props.responseLoading && !props.sendError && props.responseData" 
            class="bg-[#232b36] rounded p-2 font-mono text-xs whitespace-pre-wrap response-content" 
            style="min-height: 120px; color: #b0bec5;" 
            v-html="formattedResponse" 
            @click="handleCollapseClick">
-    </div>
-    <div v-else-if="!props.sendLoading && !props.sendError && !props.responseData" class="text-[#b0bec5] mt-2">
-      No response yet. Click <span class="font-bold">Send</span> to make a request.
+      </div>
+      <div v-else-if="!props.sendLoading && !props.responseLoading && !props.sendError && !props.responseData" class="text-[#b0bec5] mt-2">
+        No response yet. Click <span class="font-bold">Send</span> to make a request.
       </div>
     </div>
 
     <!-- Status bar -->
     <div style="height: 28px; min-height: 28px; max-height: 28px; background: #1b222c; border-top: 1px solid #2c3e50; display: flex; align-items: center; justify-content: space-between; padding-left: 16px; padding-right: 8px; font-size: 0.75rem; flex-shrink: 0; color: #fff; margin: 0; gap: 8px;">
       <div class="flex items-center gap-2">
-        <template v-if="!props.sendLoading && !props.sendError && props.responseData">
+        <template v-if="!props.sendLoading && !props.responseLoading && !props.sendError && props.responseData">
           <span class="text-[#b0bec5]">Response time: <span class="text-[#42b983]">{{ props.responseTime }}ms</span></span>
           <span class="text-[#b0bec5]">Size: <span class="text-[#42b983]">{{ formattedSize }}</span></span>
         </template>
       </div>
       <div class="flex items-center">
         <button 
-          v-if="!props.sendLoading && !props.sendError && props.responseData"
+          v-if="!props.sendLoading && !props.responseLoading && !props.sendError && props.responseData"
           @click="copyToClipboard"
           class="text-[#42b983] hover:text-[#42b983] hover:opacity-80 transition-colors duration-200 p-1"
           title="Copy response to clipboard"
