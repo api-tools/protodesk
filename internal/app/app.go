@@ -244,11 +244,9 @@ func (a *App) ScanAndParseProtoPath(serverProfileId string, protoPathId string, 
 	}
 	fmt.Printf("[DEBUG] Scanning proto path: %s\n", absPath)
 
-	// Create a parser with the root proto directory as the import path
-	parser := proto.NewParser([]string{absPath})
-
 	// Recursively collect all .proto files from the specified path
 	var protoFiles []string
+	var importPaths []string
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -257,6 +255,11 @@ func (a *App) ScanAndParseProtoPath(serverProfileId string, protoPathId string, 
 		if info.IsDir() && info.Name() == "node_modules" {
 			fmt.Printf("[DEBUG] Skipping node_modules directory: %s\n", path)
 			return filepath.SkipDir
+		}
+		if info.IsDir() {
+			// Add each directory to import paths
+			importPaths = append(importPaths, path)
+			fmt.Printf("[DEBUG] Added import path: %s\n", path)
 		}
 		if !info.IsDir() && filepath.Ext(path) == ".proto" {
 			fmt.Printf("[DEBUG] Found proto file: %s\n", path)
@@ -268,6 +271,10 @@ func (a *App) ScanAndParseProtoPath(serverProfileId string, protoPathId string, 
 		return fmt.Errorf("failed to walk proto directory: %w", err)
 	}
 	fmt.Printf("[DEBUG] Total proto files to parse: %d\n", len(protoFiles))
+	fmt.Printf("[DEBUG] Total import paths: %d\n", len(importPaths))
+
+	// Create a parser with all directories as import paths
+	parser := proto.NewParser(importPaths)
 
 	// Parse each proto file
 	for _, protoFile := range protoFiles {
@@ -286,6 +293,8 @@ func (a *App) ScanAndParseProtoPath(serverProfileId string, protoPathId string, 
 		// Parse the proto file directly from its original location
 		fileDesc, err := parser.ParseFile(protoFile)
 		if err != nil {
+			fmt.Printf("[DEBUG] Failed to parse proto file %s: %v\n", protoFile, err)
+			fmt.Printf("[DEBUG] Import paths used: %v\n", importPaths)
 			return fmt.Errorf("failed to parse proto file %s: %w", protoFile, err)
 		}
 

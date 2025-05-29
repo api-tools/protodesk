@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -198,26 +197,10 @@ func (p *Parser) parseProtoFile(filePath string, content []byte) (protoreflect.F
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	// Determine well-known types path (cross-platform)
-	wellKnownTypesPath := os.Getenv("PROTOBUF_WELL_KNOWN_TYPES_PATH")
-	if wellKnownTypesPath == "" {
-		switch runtime.GOOS {
-		case "darwin":
-			wellKnownTypesPath = "/usr/local/include"
-		case "linux":
-			wellKnownTypesPath = "/usr/include"
-		case "windows":
-			wellKnownTypesPath = `C:/Program Files/protoc/include`
-		default:
-			wellKnownTypesPath = "/usr/local/include"
-		}
-	}
-
 	// Prepare protoc command
 	args := []string{
-		"--proto_path=" + baseDir,            // Add the base directory as the first import path
-		"--proto_path=" + tmpDir,             // Add the temp directory
-		"--proto_path=" + wellKnownTypesPath, // Well-known types include path
+		"--proto_path=" + baseDir, // Add the base directory as the first import path
+		"--proto_path=" + tmpDir,  // Add the temp directory
 		"--descriptor_set_out=" + filepath.Join(tmpDir, "descriptor.pb"),
 		"--include_imports",
 	}
@@ -229,6 +212,8 @@ func (p *Parser) parseProtoFile(filePath string, content []byte) (protoreflect.F
 
 	// Add the main proto file
 	args = append(args, tmpFile)
+
+	fmt.Printf("[DEBUG] Running protoc with args: %v\n", args)
 
 	// Run protoc and surface errors clearly
 	cmd := exec.Command("protoc", args...)
@@ -259,7 +244,7 @@ func (p *Parser) parseProtoFile(filePath string, content []byte) (protoreflect.F
 	// Find the target file in the registry (use relative path)
 	fileDesc, err := registry.FindFileByPath(relPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find file in registry: %w.\nIf this is an import issue, check your import paths and well-known types include path.", err)
+		return nil, fmt.Errorf("failed to find file in registry: %w.\nIf this is an import issue, check your import paths.", err)
 	}
 
 	return fileDesc, nil
@@ -285,9 +270,36 @@ func (p *Parser) resolveImport(importPath string) (*descriptorpb.FileDescriptorP
 		}
 	}
 
-	// If not found in import paths, try to use well-known types
+	// If not found in import paths, try to use well-known types from the protobuf package
 	if desc, err := protoregistry.GlobalFiles.FindFileByPath(importPath); err == nil {
 		return protodesc.ToFileDescriptorProto(desc), nil
+	}
+
+	// If still not found, try to use the built-in well-known types
+	switch importPath {
+	case "google/protobuf/timestamp.proto":
+		// Use the built-in Timestamp type
+		return &descriptorpb.FileDescriptorProto{
+			Name:    proto.String("google/protobuf/timestamp.proto"),
+			Package: proto.String("google.protobuf"),
+			MessageType: []*descriptorpb.DescriptorProto{
+				{
+					Name: proto.String("Timestamp"),
+					Field: []*descriptorpb.FieldDescriptorProto{
+						{
+							Name:   proto.String("seconds"),
+							Number: proto.Int32(1),
+							Type:   descriptorpb.FieldDescriptorProto_TYPE_INT64.Enum(),
+						},
+						{
+							Name:   proto.String("nanos"),
+							Number: proto.Int32(2),
+							Type:   descriptorpb.FieldDescriptorProto_TYPE_INT32.Enum(),
+						},
+					},
+				},
+			},
+		}, nil
 	}
 
 	return nil, fmt.Errorf("import %s not found", importPath)

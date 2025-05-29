@@ -132,8 +132,35 @@ func (m *DefaultGRPCClientManager) GetConnection(target string) (*grpc.ClientCon
 // ListServicesAndMethods uses gRPC reflection to list all services and their methods for a given connection
 func (m *DefaultGRPCClientManager) ListServicesAndMethods(conn *grpc.ClientConn) (map[string][]string, error) {
 	ctx := context.Background()
+
+	// Create a reflection client
 	rc := grpcreflect.NewClient(ctx, reflectpb.NewServerReflectionClient(conn))
 	defer rc.Reset()
+
+	// Register well-known types
+	wellKnownTypes := []string{
+		"google/protobuf/timestamp.proto",
+		"google/protobuf/empty.proto",
+		"google/protobuf/any.proto",
+		"google/protobuf/struct.proto",
+		"google/protobuf/wrappers.proto",
+	}
+
+	fmt.Println("[ListServicesAndMethods] Registering well-known types")
+	for _, typeName := range wellKnownTypes {
+		fmt.Printf("[ListServicesAndMethods] Registering well-known type: %s\n", typeName)
+		// Try to get the file descriptor for the well-known type
+		fileDesc, err := rc.FileContainingSymbol(typeName)
+		if err != nil {
+			fmt.Printf("[ListServicesAndMethods] Warning: Failed to get file descriptor for well-known type %s: %v\n", typeName, err)
+			continue
+		}
+		// Print the file descriptor name and dependencies for debugging
+		fmt.Printf("[ListServicesAndMethods] Found file descriptor for %s: %s\n", typeName, fileDesc.GetName())
+		for _, dep := range fileDesc.GetDependencies() {
+			fmt.Printf("[ListServicesAndMethods] Dependency for %s: %s\n", typeName, dep.GetName())
+		}
+	}
 
 	fmt.Println("[ListServicesAndMethods] Starting reflection client")
 	services, err := rc.ListServices()
@@ -153,6 +180,21 @@ func (m *DefaultGRPCClientManager) ListServicesAndMethods(conn *grpc.ClientConn)
 		svcDesc, err := rc.ResolveService(svc)
 		if err != nil {
 			fmt.Printf("[ListServicesAndMethods] Failed to resolve service %s: %v\n", svc, err)
+			// Try to get more information about the error
+			if err.Error() == "proto: message field \"sportradar.bsa.magic.odds.v2.ListMarketsRequest.updatedAtFrom\" cannot resolve type: \"*.google.protobuf.Timestamp\" not found" {
+				fmt.Println("[ListServicesAndMethods] Timestamp type resolution error detected")
+				// Try to get the file descriptor for the service
+				fileDesc, err := rc.FileContainingSymbol(svc)
+				if err != nil {
+					fmt.Printf("[ListServicesAndMethods] Failed to get file descriptor for service %s: %v\n", svc, err)
+				} else {
+					fmt.Printf("[ListServicesAndMethods] Found file descriptor for service %s: %s\n", svc, fileDesc.GetName())
+					// Print all dependencies
+					for _, dep := range fileDesc.GetDependencies() {
+						fmt.Printf("[ListServicesAndMethods] Service dependency: %s\n", dep.GetName())
+					}
+				}
+			}
 			continue // skip services we can't resolve
 		}
 		var methods []string
