@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"protodesk/pkg/models"
@@ -19,6 +22,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	reflectpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
+	pbproto "google.golang.org/protobuf/proto"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 )
 
 // App struct represents the main application
@@ -147,7 +152,10 @@ func (a *App) SaveProtoDefinition(def *proto.ProtoDefinition) error {
 
 // ListProtoDefinitionsByProfile lists proto definitions for a server profile
 func (a *App) ListProtoDefinitionsByProfile(profileID string) ([]*proto.ProtoDefinition, error) {
-	return a.profileManager.GetStore().ListProtoDefinitionsByProfile(a.ctx, profileID)
+	if a.profileManager == nil {
+		return nil, fmt.Errorf("profileManager is not initialized")
+	}
+	return a.profileManager.ListProtoDefinitionsByProfile(profileID)
 }
 
 // DeleteProtoDefinition deletes a proto definition by ID
@@ -242,104 +250,258 @@ func (a *App) ScanAndParseProtoPath(serverProfileId string, protoPathId string, 
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
-	fmt.Printf("[DEBUG] Scanning proto path: %s\n", absPath)
+	fmt.Printf("[PATH_SCAN] Starting scan at: %s\n", absPath)
 
-	// Recursively collect all .proto files from the specified path
-	var protoFiles []string
-	var importPaths []string
+	// Create a map to store unique import paths
+	importPaths := make(map[string]bool)
+	importPaths[absPath] = true // Use the exact path the user selected
+
+	// Create a map to store unique proto files
+	protoFilesMap := make(map[string]bool)
+
+	// First pass: collect all directories that contain .proto files
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		// Skip node_modules directory
-		if info.IsDir() && info.Name() == "node_modules" {
-			fmt.Printf("[DEBUG] Skipping node_modules directory: %s\n", path)
+
+		fmt.Printf("[PATH_SCAN] First pass - Path: %s (isDir: %v)\n", path, info.IsDir())
+
+		// Skip anything in node_modules
+		if strings.Contains(path, "node_modules") {
+			fmt.Printf("[PATH_SCAN] !!! Found node_modules in path: %s, skipping entire directory !!!\n", path)
 			return filepath.SkipDir
 		}
+
 		if info.IsDir() {
-			// Add each directory to import paths
-			importPaths = append(importPaths, path)
-			fmt.Printf("[DEBUG] Added import path: %s\n", path)
-		}
-		if !info.IsDir() && filepath.Ext(path) == ".proto" {
-			fmt.Printf("[DEBUG] Found proto file: %s\n", path)
-			protoFiles = append(protoFiles, path)
+			// Check if this directory contains any .proto files
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".proto") {
+					importPaths[path] = true
+					fmt.Printf("[PATH_SCAN] Added import path: %s\n", path)
+					break
+				}
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to walk proto directory: %w", err)
+		return fmt.Errorf("failed to scan directory: %w", err)
 	}
-	fmt.Printf("[DEBUG] Total proto files to parse: %d\n", len(protoFiles))
-	fmt.Printf("[DEBUG] Total import paths: %d\n", len(importPaths))
 
-	// Create a parser with all directories as import paths
-	parser := proto.NewParser(importPaths)
+	// Convert map to sorted slice of paths (most specific first)
+	var paths []string
+	for p := range importPaths {
+		paths = append(paths, p)
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		// Sort by path length in descending order (most specific first)
+		return len(paths[i]) > len(paths[j])
+	})
+
+	fmt.Printf("[PATH_SCAN] === Collected import paths before second pass ===\n")
+	for _, p := range paths {
+		fmt.Printf("[PATH_SCAN] Import path: %s\n", p)
+	}
+	fmt.Printf("[PATH_SCAN] === End of import paths ===\n")
+
+	// Second pass: collect all .proto files
+	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("[PATH_SCAN] Second pass - Path: %s (isDir: %v)\n", path, info.IsDir())
+
+		// Skip anything in node_modules
+		if strings.Contains(path, "node_modules") {
+			fmt.Printf("[PATH_SCAN] !!! Second pass found node_modules in path: %s, skipping entire directory !!!\n", path)
+			return filepath.SkipDir
+		}
+
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".proto") {
+			protoFilesMap[path] = true
+			fmt.Printf("[PATH_SCAN] Found proto file: %s\n", path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to collect proto files: %w", err)
+	}
+
+	// Convert map to slice
+	var protoFiles []string
+	for p := range protoFilesMap {
+		protoFiles = append(protoFiles, p)
+	}
+
+	fmt.Printf("[PATH_SCAN] Total proto files to parse: %d\n", len(protoFiles))
+	fmt.Printf("[PATH_SCAN] Total import paths: %d\n", len(paths))
 
 	// Parse each proto file
 	for _, protoFile := range protoFiles {
-		fmt.Printf("[DEBUG] Parsing proto file: %s\n", protoFile)
+		fmt.Printf("[PATH_SCAN] Parsing proto file: %s\n", protoFile)
+
+		// Build protoc command with all import paths
+		args := []string{
+			"--descriptor_set_out=" + protoFile + ".pb",
+			"--include_imports",
+		}
+
+		// Add import paths in order (most specific first)
+		for _, p := range paths {
+			args = append(args, "--proto_path="+p)
+		}
+
+		// Add the proto file
+		args = append(args, protoFile)
+
+		fmt.Printf("[PATH_SCAN] Running protoc with args: %v\n", args)
+
+		// Run protoc
+		cmd := exec.Command("protoc", args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			// Clean up the descriptor file if it was created
+			os.Remove(protoFile + ".pb")
+			fmt.Printf("[PATH_SCAN] ERROR: protoc failed for %s: %v\nOutput: %s\n", protoFile, err, string(output))
+			continue // Skip this file but continue with others
+		}
+
+		// Always log protoc output for debugging
+		fmt.Printf("[PATH_SCAN] protoc output for %s: %s\n", protoFile, string(output))
+
+		// Check if the descriptor file was created
+		if _, err := os.Stat(protoFile + ".pb"); os.IsNotExist(err) {
+			fmt.Printf("[PATH_SCAN] ERROR: Descriptor file was not created for %s\n", protoFile)
+			continue
+		}
+
+		// Read the descriptor file
+		descriptorData, err := os.ReadFile(protoFile + ".pb")
+		if err != nil {
+			os.Remove(protoFile + ".pb")
+			fmt.Printf("[PATH_SCAN] ERROR: Failed to read descriptor file for %s: %v\n", protoFile, err)
+			continue // Skip this file but continue with others
+		}
+
+		// Clean up the descriptor file
+		os.Remove(protoFile + ".pb")
+
+		// Parse the descriptor file
+		var descriptorSet descriptorpb.FileDescriptorSet
+		if err := pbproto.Unmarshal(descriptorData, &descriptorSet); err != nil {
+			fmt.Printf("[PATH_SCAN] ERROR: Failed to parse descriptor file for %s: %v\n", protoFile, err)
+			continue // Skip this file but continue with others
+		}
+
+		fmt.Printf("[PATH_SCAN] Successfully parsed descriptor set for %s\n", protoFile)
+		fmt.Printf("[PATH_SCAN] Number of files in descriptor set: %d\n", len(descriptorSet.GetFile()))
+
+		// Read the original proto file content
 		content, err := os.ReadFile(protoFile)
 		if err != nil {
-			return fmt.Errorf("failed to read proto file %s: %w", protoFile, err)
+			fmt.Printf("[PATH_SCAN] ERROR: Failed to read proto file %s: %v\n", protoFile, err)
+			continue // Skip this file but continue with others
 		}
 
-		// Get the relative path from the selected folder
-		relPath, err := filepath.Rel(absPath, protoFile)
-		if err != nil {
-			return fmt.Errorf("failed to get relative path for %s: %w", protoFile, err)
-		}
+		// Process the descriptor set
+		for _, file := range descriptorSet.GetFile() {
+			// Convert the file name to a relative path that matches our format
+			descriptorFileName := file.GetName()
+			fmt.Printf("[PATH_SCAN] Checking descriptor file: %s\n", descriptorFileName)
 
-		// Parse the proto file directly from its original location
-		fileDesc, err := parser.ParseFile(protoFile)
-		if err != nil {
-			fmt.Printf("[DEBUG] Failed to parse proto file %s: %v\n", protoFile, err)
-			fmt.Printf("[DEBUG] Import paths used: %v\n", importPaths)
-			return fmt.Errorf("failed to parse proto file %s: %w", protoFile, err)
-		}
-
-		// Store the proto definition in the database
-		def := &proto.ProtoDefinition{
-			ID:              uuid.New().String(),
-			FilePath:        relPath,
-			Content:         string(content),
-			Imports:         fileDesc.Imports,
-			Services:        fileDesc.Services,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			ServerProfileID: serverProfileId,
-		}
-
-		// Check if a proto definition with the same path already exists
-		existingDefs, err := a.profileManager.GetStore().ListProtoDefinitionsByProfile(a.ctx, serverProfileId)
-		if err != nil {
-			return fmt.Errorf("failed to list proto definitions: %w", err)
-		}
-
-		var existingDef *proto.ProtoDefinition
-		for _, d := range existingDefs {
-			if d.FilePath == relPath {
-				existingDef = d
-				break
+			// Skip if this isn't the main file we're processing
+			// The descriptor set includes all imported files, but we only want to process the main file
+			if !strings.HasSuffix(descriptorFileName, filepath.Base(protoFile)) {
+				fmt.Printf("[PATH_SCAN] Skipping imported file: %s\n", descriptorFileName)
+				continue
 			}
-		}
 
-		if existingDef != nil {
-			// Update existing definition
-			def.ID = existingDef.ID
-			def.CreatedAt = existingDef.CreatedAt
-			err = a.profileManager.GetStore().UpdateProtoDefinition(a.ctx, def)
+			fmt.Printf("[PATH_SCAN] Processing file: %s\n", protoFile)
+			fmt.Printf("[PATH_SCAN] Number of services in file: %d\n", len(file.GetService()))
+
+			// Store the proto definition in the database
+			def := &proto.ProtoDefinition{
+				ID:              uuid.New().String(),
+				FilePath:        protoFile, // Use absolute path for scanned files
+				Content:         string(content),
+				Imports:         file.GetDependency(),
+				Services:        make([]proto.Service, 0),
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+				ServerProfileID: serverProfileId,
+				ProtoPathID:     protoPathId,
+			}
+
+			// Extract service names and methods
+			for _, service := range file.GetService() {
+				fmt.Printf("[PATH_SCAN] Found service: %s\n", service.GetName())
+				serviceDef := proto.Service{
+					Name:        service.GetName(),
+					Methods:     make([]proto.Method, 0),
+					Description: fmt.Sprintf("%v", service.GetOptions().GetDeprecated()),
+				}
+
+				// Extract methods
+				for _, method := range service.GetMethod() {
+					fmt.Printf("[PATH_SCAN] Found method: %s in service %s\n", method.GetName(), service.GetName())
+					methodDef := proto.Method{
+						Name:        method.GetName(),
+						Description: fmt.Sprintf("%v", method.GetOptions().GetDeprecated()),
+						InputType: proto.MessageType{
+							Name: method.GetInputType(),
+						},
+						OutputType: proto.MessageType{
+							Name: method.GetOutputType(),
+						},
+					}
+					serviceDef.Methods = append(serviceDef.Methods, methodDef)
+				}
+
+				def.Services = append(def.Services, serviceDef)
+			}
+
+			fmt.Printf("[PATH_SCAN] Created proto definition with %d services\n", len(def.Services))
+
+			// Check if a proto definition with the same path already exists
+			existingDefs, err := a.profileManager.GetStore().ListProtoDefinitionsByProfile(a.ctx, serverProfileId)
 			if err != nil {
-				return fmt.Errorf("failed to update proto definition: %w", err)
+				fmt.Printf("[PATH_SCAN] ERROR: Failed to list proto definitions: %v\n", err)
+				continue // Skip this file but continue with others
 			}
-			fmt.Printf("[DEBUG] Updated existing proto definition: %s\n", relPath)
-		} else {
-			// Create new definition
-			err = a.profileManager.GetStore().CreateProtoDefinition(a.ctx, def)
-			if err != nil {
-				return fmt.Errorf("failed to create proto definition: %w", err)
+
+			var existingDef *proto.ProtoDefinition
+			for _, d := range existingDefs {
+				if d.FilePath == protoFile { // Compare absolute paths
+					existingDef = d
+					break
+				}
 			}
-			fmt.Printf("[DEBUG] Created new proto definition: %s\n", relPath)
+
+			if existingDef != nil {
+				// Update existing definition
+				def.ID = existingDef.ID
+				def.CreatedAt = existingDef.CreatedAt
+				err = a.profileManager.GetStore().UpdateProtoDefinition(a.ctx, def)
+				if err != nil {
+					fmt.Printf("[PATH_SCAN] ERROR: Failed to update proto definition: %v\n", err)
+				} else {
+					fmt.Printf("[PATH_SCAN] Updated existing proto definition: %s\n", protoFile)
+				}
+			} else {
+				// Create new definition
+				err = a.profileManager.GetStore().CreateProtoDefinition(a.ctx, def)
+				if err != nil {
+					fmt.Printf("[PATH_SCAN] ERROR: Failed to create proto definition: %v\n", err)
+				} else {
+					fmt.Printf("[PATH_SCAN] Created new proto definition: %s\n", protoFile)
+				}
+			}
 		}
 	}
 
@@ -351,12 +513,19 @@ func (a *App) CreateProtoPath(id, serverProfileId, path string) error {
 	if a.profileManager == nil {
 		return fmt.Errorf("profile manager not initialized; startup may not have run successfully")
 	}
+	fmt.Printf("[DEBUG] Creating proto path with ID: %s, ServerProfileID: %s, Path: %s\n", id, serverProfileId, path)
 	protoPath := &services.ProtoPath{
 		ID:              id,
 		ServerProfileID: serverProfileId,
 		Path:            path,
 	}
-	return a.profileManager.GetStore().CreateProtoPath(context.Background(), protoPath)
+	err := a.profileManager.GetStore().CreateProtoPath(context.Background(), protoPath)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to create proto path: %v\n", err)
+		return err
+	}
+	fmt.Printf("[DEBUG] Successfully created proto path\n")
+	return nil
 }
 
 // ListProtoPathsByServer lists proto paths for a given server profile

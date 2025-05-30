@@ -594,9 +594,15 @@ func (s *SQLiteStore) ListProtoDefinitionsByProtoPath(ctx context.Context, proto
 }
 
 func (s *SQLiteStore) CreateProtoPath(ctx context.Context, path *ProtoPath) error {
+	fmt.Printf("[DEBUG] SQLiteStore.CreateProtoPath called with ID: %s, ServerProfileID: %s, Path: %s\n", path.ID, path.ServerProfileID, path.Path)
 	query := `INSERT INTO proto_paths (id, server_profile_id, path) VALUES (?, ?, ?)`
 	_, err := s.db.ExecContext(ctx, query, path.ID, path.ServerProfileID, path.Path)
-	return err
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to insert proto path: %v\n", err)
+		return err
+	}
+	fmt.Printf("[DEBUG] Successfully inserted proto path into database\n")
+	return nil
 }
 
 func (s *SQLiteStore) ListProtoPathsByServer(ctx context.Context, serverID string) ([]*ProtoPath, error) {
