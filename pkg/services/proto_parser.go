@@ -1,205 +1,255 @@
 package services
 
 import (
+	"bytes"
+	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
+	"time"
 
-	"github.com/jhump/protoreflect/desc"
-	"google.golang.org/protobuf/proto"
+	"github.com/google/uuid"
+	pbproto "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
+
+	"protodesk/pkg/models/proto"
 )
 
-// DefaultProtoParser is the default implementation of ProtoParser
-type DefaultProtoParser struct {
-	parsedFiles map[string]*desc.FileDescriptor
-	services    map[string]*desc.ServiceDescriptor
-	methods     map[string]*desc.MethodDescriptor
-	messages    map[string]*desc.MessageDescriptor
-	enums       map[string]*desc.EnumDescriptor
+// ProtoParser handles parsing of proto files
+type ProtoParser struct {
+	store ServerProfileStore
 }
 
-// NewDefaultProtoParser creates a new DefaultProtoParser
-func NewDefaultProtoParser() *DefaultProtoParser {
-	return &DefaultProtoParser{
-		parsedFiles: make(map[string]*desc.FileDescriptor),
-		services:    make(map[string]*desc.ServiceDescriptor),
-		methods:     make(map[string]*desc.MethodDescriptor),
-		messages:    make(map[string]*desc.MessageDescriptor),
-		enums:       make(map[string]*desc.EnumDescriptor),
+// NewProtoParser creates a new ProtoParser
+func NewProtoParser(store ServerProfileStore) *ProtoParser {
+	return &ProtoParser{
+		store: store,
 	}
 }
 
-// copyFile copies a file from src to dst
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, sourceFile)
-	return err
-}
-
-// ScanAndParseProtoPath scans a directory for .proto files and parses them
-func (p *DefaultProtoParser) ScanAndParseProtoPath(path string) error {
+// ScanAndParseProtoPath scans a directory for proto files and parses them
+func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId string, protoPathId string, path string) error {
 	fmt.Printf("[DEBUG] Scanning proto path: %s\n", path)
 
-	// Create a map to store unique import paths
-	importPaths := make(map[string]bool)
-	importPaths[path] = true
-
-	// First pass: collect all directories that contain .proto files
+	// Find all proto files
+	var protoFiles []string
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			// Check if this directory contains any .proto files
-			entries, err := os.ReadDir(path)
-			if err != nil {
-				return err
-			}
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".proto") {
-					importPaths[path] = true
-					fmt.Printf("[DEBUG] Added import path: %s\n", path)
-					break
-				}
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to scan directory: %w", err)
-	}
-
-	// Convert map to sorted slice of paths (most specific first)
-	var paths []string
-	for p := range importPaths {
-		paths = append(paths, p)
-	}
-	sort.Slice(paths, func(i, j int) bool {
-		// Sort by path length in descending order (most specific first)
-		return len(paths[i]) > len(paths[j])
-	})
-
-	// Second pass: collect all .proto files
-	var protoFiles []string
-	err = filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+		// Skip node_modules directory
+		if info.IsDir() && info.Name() == "node_modules" {
+			return filepath.SkipDir
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".proto") {
-			protoFiles = append(protoFiles, path)
 			fmt.Printf("[DEBUG] Found proto file: %s\n", path)
+			protoFiles = append(protoFiles, path)
 		}
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to collect proto files: %w", err)
+		return fmt.Errorf("failed to walk directory: %w", err)
 	}
 
 	fmt.Printf("[DEBUG] Total proto files to parse: %d\n", len(protoFiles))
-	fmt.Printf("[DEBUG] Total import paths: %d\n", len(paths))
 
+	// Build import paths
+	var importPaths []string
+	// Find the root proto directory by walking up until we find a directory containing 'proto'
+	rootProtoDir := path
+	for {
+		parent := filepath.Dir(rootProtoDir)
+		if parent == rootProtoDir {
+			break // Reached root directory
+		}
+		if filepath.Base(parent) == "proto" {
+			rootProtoDir = parent
+			break
+		}
+		rootProtoDir = parent
+	}
+	importPaths = append(importPaths, rootProtoDir)
+	// Add the base directory and the proto path itself
+	baseDir := filepath.Dir(path)
+	importPaths = append(importPaths, baseDir)
+	importPaths = append(importPaths, path)
+
+	fmt.Printf("[DEBUG] Using import paths: %v\n", importPaths)
+
+	successfullyParsed := 0
 	// Parse each proto file
-	for _, protoFile := range protoFiles {
-		fmt.Printf("[DEBUG] Parsing proto file: %s\n", protoFile)
+	for _, file := range protoFiles {
+		fmt.Printf("[DEBUG] Parsing file: %s\n", file)
 
-		// Build protoc command with all import paths
+		// Create a temporary file for the descriptor set
+		tmpFile, err := os.CreateTemp("", "protoc-*.desc")
+		if err != nil {
+			fmt.Printf("[DEBUG] Failed to create temporary file: %v\n", err)
+			continue
+		}
+		tmpFile.Close()
+		defer os.Remove(tmpFile.Name())
+
+		// Build protoc command arguments
 		args := []string{
-			"--descriptor_set_out=" + protoFile + ".pb",
+			"--descriptor_set_out=" + tmpFile.Name(),
 			"--include_imports",
 		}
-
-		// Add import paths in order (most specific first)
-		for _, p := range paths {
-			args = append(args, "--proto_path="+p)
+		for _, importPath := range importPaths {
+			args = append(args, "-I"+importPath)
 		}
-
-		// Add the proto file
-		args = append(args, protoFile)
+		args = append(args, file)
 
 		fmt.Printf("[DEBUG] Running protoc with args: %v\n", args)
 
-		// Run protoc
-		cmd := exec.Command("protoc", args...)
-		output, err := cmd.CombinedOutput()
+		// Run protoc command
+		cmd := exec.CommandContext(ctx, "protoc", args...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err = cmd.Run()
 		if err != nil {
-			// Clean up the descriptor file if it was created
-			os.Remove(protoFile + ".pb")
-			return fmt.Errorf("failed to parse proto file %s: %w", protoFile, fmt.Errorf("protoc failed (output: %s): %v", string(output), err))
+			fmt.Printf("[DEBUG] Failed to run protoc: %v\n", err)
+			fmt.Printf("[DEBUG] protoc stderr output: %s\n", stderr.String())
+			continue
 		}
 
-		// Read the descriptor file
-		descriptorData, err := os.ReadFile(protoFile + ".pb")
+		// Read the descriptor set from the temporary file
+		output, err := os.ReadFile(tmpFile.Name())
 		if err != nil {
-			os.Remove(protoFile + ".pb")
-			return fmt.Errorf("failed to read descriptor file: %w", err)
+			fmt.Printf("[DEBUG] Failed to read descriptor set file: %v\n", err)
+			continue
 		}
 
-		// Clean up the descriptor file
-		os.Remove(protoFile + ".pb")
+		fmt.Printf("[DEBUG] Read %d bytes from descriptor set file\n", len(output))
+		fmt.Printf("[DEBUG] protoc stderr output: %s\n", stderr.String())
 
-		// Parse the descriptor file
-		var descriptorSet descriptorpb.FileDescriptorSet
-		if err := proto.Unmarshal(descriptorData, &descriptorSet); err != nil {
-			return fmt.Errorf("failed to parse descriptor file: %w", err)
+		// Parse descriptor set
+		descriptorSet := &descriptorpb.FileDescriptorSet{}
+		if err := pbproto.Unmarshal(output, descriptorSet); err != nil {
+			fmt.Printf("[DEBUG] Failed to unmarshal descriptor set: %v\n", err)
+			continue
 		}
 
-		// Process the descriptor set
-		for _, file := range descriptorSet.GetFile() {
-			// Skip if we've already processed this file
-			if _, exists := p.parsedFiles[file.GetName()]; exists {
+		fmt.Printf("[DEBUG] Successfully parsed descriptor set with %d files\n", len(descriptorSet.File))
+
+		// Process each file descriptor
+		for _, fileDesc := range descriptorSet.File {
+			fmt.Printf("[DEBUG] Processing file descriptor: %s\n", fileDesc.GetName())
+
+			// Read the original proto file content
+			content, err := os.ReadFile(file)
+			if err != nil {
+				fmt.Printf("[DEBUG] Failed to read proto file: %v\n", err)
 				continue
 			}
 
-			// Parse the file descriptor
-			fd, err := desc.CreateFileDescriptorFromSet(&descriptorSet)
-			if err != nil {
-				return fmt.Errorf("failed to create file descriptor for %s: %w", file.GetName(), err)
+			// Get the actual file path from the descriptor
+			filePath := fileDesc.GetName()
+			if strings.HasPrefix(filePath, "google/protobuf/") {
+				// If it's a google/protobuf file, use the original file path
+				filePath = file
 			}
 
-			// Store the file descriptor
-			p.parsedFiles[file.GetName()] = fd
+			// Create proto definition
+			def := &proto.ProtoDefinition{
+				ID:              uuid.New().String(),
+				FilePath:        filePath,
+				Content:         string(content),
+				Imports:         fileDesc.GetDependency(),
+				Services:        make([]proto.Service, 0),
+				Enums:           make([]proto.EnumType, 0),
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+				ServerProfileID: serverProfileId,
+				ProtoPathID:     protoPathId,
+			}
 
-			// Process services
-			for _, service := range fd.GetServices() {
-				serviceName := service.GetFullyQualifiedName()
-				p.services[serviceName] = service
+			fmt.Printf("[DEBUG] Created proto definition object - ID: %s, FilePath: %s\n", def.ID, def.FilePath)
 
-				// Process methods
-				for _, method := range service.GetMethods() {
-					methodName := method.GetFullyQualifiedName()
-					p.methods[methodName] = method
+			// Extract services and methods
+			for _, service := range fileDesc.GetService() {
+				svc := proto.Service{
+					Name:    service.GetName(),
+					Methods: make([]proto.Method, 0),
+				}
+
+				for _, method := range service.GetMethod() {
+					svc.Methods = append(svc.Methods, proto.Method{
+						Name:            method.GetName(),
+						InputType:       proto.MessageType{Name: method.GetInputType()},
+						OutputType:      proto.MessageType{Name: method.GetOutputType()},
+						ClientStreaming: method.GetClientStreaming(),
+						ServerStreaming: method.GetServerStreaming(),
+					})
+				}
+
+				def.Services = append(def.Services, svc)
+			}
+
+			fmt.Printf("[DEBUG] Found %d services\n", len(def.Services))
+			if len(def.Services) > 0 {
+				fmt.Printf("[DEBUG] First service has %d methods\n", len(def.Services[0].Methods))
+			}
+
+			// Extract enums
+			for _, enum := range fileDesc.GetEnumType() {
+				enumDef := proto.EnumType{
+					Name:   enum.GetName(),
+					Values: make([]proto.EnumValue, 0),
+				}
+
+				for _, value := range enum.GetValue() {
+					enumDef.Values = append(enumDef.Values, proto.EnumValue{
+						Name:   value.GetName(),
+						Number: int32(value.GetNumber()),
+					})
+				}
+
+				def.Enums = append(def.Enums, enumDef)
+			}
+
+			fmt.Printf("[DEBUG] Found %d enums\n", len(def.Enums))
+
+			// Check if proto definition already exists
+			existingDefs, err := p.store.ListProtoDefinitionsByProfile(ctx, serverProfileId)
+			if err != nil {
+				fmt.Printf("[DEBUG] Failed to list proto definitions: %v\n", err)
+				continue
+			}
+
+			var existingDef *proto.ProtoDefinition
+			for _, d := range existingDefs {
+				if d.FilePath == def.FilePath {
+					existingDef = d
+					break
 				}
 			}
 
-			// Process messages
-			for _, message := range fd.GetMessageTypes() {
-				messageName := message.GetFullyQualifiedName()
-				p.messages[messageName] = message
+			if existingDef != nil {
+				fmt.Printf("[DEBUG] Found existing definition, updating...\n")
+				def.ID = existingDef.ID
+				def.CreatedAt = existingDef.CreatedAt
+				err = p.store.UpdateProtoDefinition(ctx, def)
+				if err != nil {
+					fmt.Printf("[DEBUG] Failed to update proto definition: %v\n", err)
+					continue
+				}
+				fmt.Printf("[DEBUG] Successfully updated proto definition for %s\n", def.FilePath)
+			} else {
+				fmt.Printf("[DEBUG] Creating new proto definition...\n")
+				err = p.store.CreateProtoDefinition(ctx, def)
+				if err != nil {
+					fmt.Printf("[DEBUG] Failed to create proto definition: %v\n", err)
+					continue
+				}
+				fmt.Printf("[DEBUG] Successfully created proto definition for %s\n", def.FilePath)
 			}
-
-			// Process enums
-			for _, enum := range fd.GetEnumTypes() {
-				enumName := enum.GetFullyQualifiedName()
-				p.enums[enumName] = enum
-			}
+			successfullyParsed++
 		}
 	}
 
+	fmt.Printf("[DEBUG] Successfully parsed and saved %d proto definitions out of %d files\n", successfullyParsed, len(protoFiles))
 	return nil
 }

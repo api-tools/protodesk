@@ -38,7 +38,7 @@ export function IsServerConnected(arg1:string):Promise<boolean>;
 
 export function ListProtoDefinitionsByProfile(arg1:string):Promise<Array<proto.ProtoDefinition>>;
 
-export function ListProtoPathsByServer(arg1:string):Promise<Array<services.ProtoPath>>;
+export function ListProtoPathsByServer(arg1:string):Promise<Array<proto.ProtoPath>>;
 
 export function ListServerProfiles():Promise<Array<models.ServerProfile>>;
 
