@@ -170,7 +170,7 @@ func TestSQLiteStore_ProtoDefinitionCRUD(t *testing.T) {
 	profile := models.NewServerProfile("profile-1", "localhost", 50051)
 	profile.ID = "profile-1"
 	require.NoError(t, store.Create(ctx, profile))
-	protoPath := &ProtoPath{ID: "path1", ServerProfileID: "profile-1", Path: "/tmp"}
+	protoPath := &proto.ProtoPath{ID: "path1", ServerProfileID: "profile-1", Path: "/tmp"}
 	require.NoError(t, store.CreateProtoPath(ctx, protoPath))
 	def := &proto.ProtoDefinition{
 		ID:              "test-proto",
@@ -236,7 +236,7 @@ func TestProtoDefinitionStorage_CRUD_EnumsAndOptions(t *testing.T) {
 	profile := models.NewServerProfile("server1", "localhost", 50051)
 	profile.ID = "server1"
 	require.NoError(t, store.Create(ctx, profile))
-	protoPath := &ProtoPath{ID: "path1", ServerProfileID: "server1", Path: "/tmp"}
+	protoPath := &proto.ProtoPath{ID: "path1", ServerProfileID: "server1", Path: "/tmp"}
 	require.NoError(t, store.CreateProtoPath(ctx, protoPath))
 
 	pd := &proto.ProtoDefinition{
@@ -295,22 +295,22 @@ func TestListProtoDefinitionsByProtoPath(t *testing.T) {
 	profile := models.NewServerProfile("server1", "localhost", 50051)
 	profile.ID = "server1"
 	require.NoError(t, store.Create(ctx, profile))
-	protoPathA := &ProtoPath{ID: "pathA", ServerProfileID: "server1", Path: "/a"}
-	protoPathB := &ProtoPath{ID: "pathB", ServerProfileID: "server1", Path: "/b"}
+	protoPathA := &proto.ProtoPath{ID: "path1", ServerProfileID: "server1", Path: "/tmp/a"}
+	protoPathB := &proto.ProtoPath{ID: "path2", ServerProfileID: "server1", Path: "/tmp/b"}
 	require.NoError(t, store.CreateProtoPath(ctx, protoPathA))
 	require.NoError(t, store.CreateProtoPath(ctx, protoPathB))
 
-	pd1 := &proto.ProtoDefinition{ID: "a.proto", FilePath: "/a.proto", ProtoPathID: "pathA", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	pd2 := &proto.ProtoDefinition{ID: "b.proto", FilePath: "/b.proto", ProtoPathID: "pathB", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	pd3 := &proto.ProtoDefinition{ID: "c.proto", FilePath: "/c.proto", ProtoPathID: "pathA", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	pd1 := &proto.ProtoDefinition{ID: "a.proto", FilePath: "/a.proto", ProtoPathID: "path1", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	pd2 := &proto.ProtoDefinition{ID: "b.proto", FilePath: "/b.proto", ProtoPathID: "path2", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	pd3 := &proto.ProtoDefinition{ID: "c.proto", FilePath: "/c.proto", ProtoPathID: "path1", ServerProfileID: "server1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	require.NoError(t, store.CreateProtoDefinition(ctx, pd1))
 	require.NoError(t, store.CreateProtoDefinition(ctx, pd2))
 	require.NoError(t, store.CreateProtoDefinition(ctx, pd3))
 
-	defsA, err := store.ListProtoDefinitionsByProtoPath(ctx, "pathA")
+	defsA, err := store.ListProtoDefinitionsByProtoPath(ctx, "path1")
 	require.NoError(t, err)
 	require.Len(t, defsA, 2)
-	defsB, err := store.ListProtoDefinitionsByProtoPath(ctx, "pathB")
+	defsB, err := store.ListProtoDefinitionsByProtoPath(ctx, "path2")
 	require.NoError(t, err)
 	require.Len(t, defsB, 1)
 }
@@ -324,7 +324,7 @@ func TestCascadeDeleteProtoPath(t *testing.T) {
 	profile := models.NewServerProfile("serverX", "localhost", 50051)
 	profile.ID = "serverX"
 	require.NoError(t, store.Create(ctx, profile))
-	protoPath := &ProtoPath{ID: "pathX", ServerProfileID: "serverX", Path: "/foo"}
+	protoPath := &proto.ProtoPath{ID: "pathX", ServerProfileID: "serverX", Path: "/foo"}
 	require.NoError(t, store.CreateProtoPath(ctx, protoPath))
 	pd := &proto.ProtoDefinition{ID: "x.proto", FilePath: "/x.proto", ProtoPathID: "pathX", ServerProfileID: "serverX", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	require.NoError(t, store.CreateProtoDefinition(ctx, pd))

@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -211,6 +212,25 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 			}
 
 			fmt.Printf("[DEBUG] Found %d enums\n", len(def.Enums))
+
+			// Extract file options
+			if opts := fileDesc.GetOptions(); opts != nil {
+				fileOptionsMap := make(map[string]interface{})
+				if opts.JavaPackage != nil {
+					fileOptionsMap["java_package"] = opts.GetJavaPackage()
+				}
+				if opts.GoPackage != nil {
+					fileOptionsMap["go_package"] = opts.GetGoPackage()
+				}
+				if opts.CsharpNamespace != nil {
+					fileOptionsMap["csharp_namespace"] = opts.GetCsharpNamespace()
+				}
+				if len(fileOptionsMap) > 0 {
+					if b, err := json.Marshal(fileOptionsMap); err == nil {
+						def.FileOptions = string(b)
+					}
+				}
+			}
 
 			// Check if proto definition already exists
 			existingDefs, err := p.store.ListProtoDefinitionsByProfile(ctx, serverProfileId)

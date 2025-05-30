@@ -18,7 +18,17 @@ type mockGRPCClientManager struct {
 	connectErr  error
 }
 
-var _ GRPCClientManager = (*mockGRPCClientManager)(nil) // Verify interface implementation
+// GRPCClient defines the interface for gRPC client operations
+type GRPCClient interface {
+	CallMethod(ctx context.Context, method string, request interface{}) (interface{}, error)
+}
+
+// mockGRPCClient is a mock implementation of GRPCClient
+type mockGRPCClient struct{}
+
+func (m *mockGRPCClient) CallMethod(ctx context.Context, method string, request interface{}) (interface{}, error) {
+	return nil, nil
+}
 
 func newMockGRPCClientManager() GRPCClientManager {
 	return &mockGRPCClientManager{
@@ -44,6 +54,18 @@ func (m *mockGRPCClientManager) GetConnection(target string) (*grpc.ClientConn, 
 		return conn, nil
 	}
 	return nil, fmt.Errorf("connection not found")
+}
+
+func (m *mockGRPCClientManager) GetClient(serverProfileID string) (GRPCClient, error) {
+	return &mockGRPCClient{}, nil
+}
+
+func (m *mockGRPCClientManager) GetMethodInputDescriptor(conn *grpc.ClientConn, serviceName, methodName string) ([]FieldDescriptor, error) {
+	return nil, nil
+}
+
+func (m *mockGRPCClientManager) ListServicesAndMethods(conn *grpc.ClientConn) (map[string][]string, error) {
+	return nil, nil
 }
 
 func setupTestManager(t *testing.T) (*ServerProfileManager, *SQLiteStore, func()) {

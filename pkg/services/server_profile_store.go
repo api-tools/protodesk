@@ -409,21 +409,21 @@ func (s *SQLiteStore) CreateProtoDefinition(ctx context.Context, def *proto.Prot
 
 func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto.ProtoDefinition, error) {
 	var row struct {
-		ID              string `db:"id"`
-		FilePath        string `db:"file_path"`
-		Content         string `db:"content"`
-		Imports         string `db:"imports"`
-		Services        string `db:"services"`
-		CreatedAt       string `db:"created_at"`
-		UpdatedAt       string `db:"updated_at"`
-		Description     string `db:"description"`
-		Version         string `db:"version"`
-		ServerProfileID string `db:"server_profile_id"`
-		ProtoPathID     string `db:"proto_path_id"`
-		LastParsed      string `db:"last_parsed"`
-		Error           string `db:"error"`
-		Enums           string `db:"enums"`
-		FileOptions     string `db:"file_options"`
+		ID              string         `db:"id"`
+		FilePath        string         `db:"file_path"`
+		Content         string         `db:"content"`
+		Imports         string         `db:"imports"`
+		Services        string         `db:"services"`
+		CreatedAt       string         `db:"created_at"`
+		UpdatedAt       string         `db:"updated_at"`
+		Description     sql.NullString `db:"description"`
+		Version         sql.NullString `db:"version"`
+		ServerProfileID string         `db:"server_profile_id"`
+		ProtoPathID     string         `db:"proto_path_id"`
+		LastParsed      sql.NullString `db:"last_parsed"`
+		Error           sql.NullString `db:"error"`
+		Enums           string         `db:"enums"`
+		FileOptions     sql.NullString `db:"file_options"`
 	}
 	query := `SELECT * FROM proto_definitions WHERE id = ?`
 	err := s.db.GetContext(ctx, &row, query, id)
@@ -438,7 +438,26 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 	_ = json.Unmarshal([]byte(row.Enums), &enums)
 	createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
 	updatedAt, _ := time.Parse(time.RFC3339, row.UpdatedAt)
-	lastParsed, _ := time.Parse(time.RFC3339, row.LastParsed)
+	description := ""
+	if row.Description.Valid {
+		description = row.Description.String
+	}
+	version := ""
+	if row.Version.Valid {
+		version = row.Version.String
+	}
+	var lastParsed time.Time
+	if row.LastParsed.Valid {
+		lastParsed, _ = time.Parse(time.RFC3339, row.LastParsed.String)
+	}
+	errorMsg := ""
+	if row.Error.Valid {
+		errorMsg = row.Error.String
+	}
+	fileOptions := ""
+	if row.FileOptions.Valid {
+		fileOptions = row.FileOptions.String
+	}
 	return &proto.ProtoDefinition{
 		ID:              row.ID,
 		FilePath:        row.FilePath,
@@ -447,34 +466,34 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 		Services:        services,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
-		Description:     row.Description,
-		Version:         row.Version,
+		Description:     description,
+		Version:         version,
 		ServerProfileID: row.ServerProfileID,
 		ProtoPathID:     row.ProtoPathID,
 		LastParsed:      lastParsed,
-		Error:           row.Error,
+		Error:           errorMsg,
 		Enums:           enums,
-		FileOptions:     row.FileOptions,
+		FileOptions:     fileOptions,
 	}, nil
 }
 
 func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoDefinition, error) {
 	var rows []struct {
-		ID              string `db:"id"`
-		FilePath        string `db:"file_path"`
-		Content         string `db:"content"`
-		Imports         string `db:"imports"`
-		Services        string `db:"services"`
-		CreatedAt       string `db:"created_at"`
-		UpdatedAt       string `db:"updated_at"`
-		Description     string `db:"description"`
-		Version         string `db:"version"`
-		ServerProfileID string `db:"server_profile_id"`
-		ProtoPathID     string `db:"proto_path_id"`
-		LastParsed      string `db:"last_parsed"`
-		Error           string `db:"error"`
-		Enums           string `db:"enums"`
-		FileOptions     string `db:"file_options"`
+		ID              string         `db:"id"`
+		FilePath        string         `db:"file_path"`
+		Content         string         `db:"content"`
+		Imports         string         `db:"imports"`
+		Services        string         `db:"services"`
+		CreatedAt       string         `db:"created_at"`
+		UpdatedAt       string         `db:"updated_at"`
+		Description     sql.NullString `db:"description"`
+		Version         sql.NullString `db:"version"`
+		ServerProfileID string         `db:"server_profile_id"`
+		ProtoPathID     string         `db:"proto_path_id"`
+		LastParsed      sql.NullString `db:"last_parsed"`
+		Error           sql.NullString `db:"error"`
+		Enums           string         `db:"enums"`
+		FileOptions     sql.NullString `db:"file_options"`
 	}
 	query := `SELECT * FROM proto_definitions`
 	err := s.db.SelectContext(ctx, &rows, query)
@@ -491,7 +510,26 @@ func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoD
 		_ = json.Unmarshal([]byte(row.Enums), &enums)
 		createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
 		updatedAt, _ := time.Parse(time.RFC3339, row.UpdatedAt)
-		lastParsed, _ := time.Parse(time.RFC3339, row.LastParsed)
+		description := ""
+		if row.Description.Valid {
+			description = row.Description.String
+		}
+		version := ""
+		if row.Version.Valid {
+			version = row.Version.String
+		}
+		var lastParsed time.Time
+		if row.LastParsed.Valid {
+			lastParsed, _ = time.Parse(time.RFC3339, row.LastParsed.String)
+		}
+		errorMsg := ""
+		if row.Error.Valid {
+			errorMsg = row.Error.String
+		}
+		fileOptions := ""
+		if row.FileOptions.Valid {
+			fileOptions = row.FileOptions.String
+		}
 		defs = append(defs, &proto.ProtoDefinition{
 			ID:              row.ID,
 			FilePath:        row.FilePath,
@@ -500,14 +538,14 @@ func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoD
 			Services:        services,
 			CreatedAt:       createdAt,
 			UpdatedAt:       updatedAt,
-			Description:     row.Description,
-			Version:         row.Version,
+			Description:     description,
+			Version:         version,
 			ServerProfileID: row.ServerProfileID,
 			ProtoPathID:     row.ProtoPathID,
 			LastParsed:      lastParsed,
-			Error:           row.Error,
+			Error:           errorMsg,
 			Enums:           enums,
-			FileOptions:     row.FileOptions,
+			FileOptions:     fileOptions,
 		})
 	}
 	return defs, nil
@@ -589,83 +627,98 @@ func (s *SQLiteStore) DeleteProtoDefinition(ctx context.Context, id string) erro
 func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profileID string) ([]*proto.ProtoDefinition, error) {
 	fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Starting for profile: %s\n", profileID)
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, file_path, content, imports, services, enums, created_at, updated_at, description, server_profile_id, proto_path_id
-		FROM proto_definitions
-		WHERE server_profile_id = ?
-	`, profileID)
+	var rows []struct {
+		ID              string         `db:"id"`
+		FilePath        string         `db:"file_path"`
+		Content         string         `db:"content"`
+		Imports         string         `db:"imports"`
+		Services        string         `db:"services"`
+		CreatedAt       string         `db:"created_at"`
+		UpdatedAt       string         `db:"updated_at"`
+		Description     sql.NullString `db:"description"`
+		Version         sql.NullString `db:"version"`
+		ServerProfileID string         `db:"server_profile_id"`
+		ProtoPathID     string         `db:"proto_path_id"`
+		LastParsed      sql.NullString `db:"last_parsed"`
+		Error           sql.NullString `db:"error"`
+		Enums           string         `db:"enums"`
+		FileOptions     sql.NullString `db:"file_options"`
+	}
+	query := `SELECT * FROM proto_definitions WHERE server_profile_id = ?`
+	err := s.db.SelectContext(ctx, &rows, query, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query proto definitions: %w", err)
 	}
-	defer rows.Close()
-
-	var definitions []*proto.ProtoDefinition
-	for rows.Next() {
-		var def proto.ProtoDefinition
-		var description sql.NullString
-		var importsJSON, servicesJSON, enumsJSON string
-
-		err := rows.Scan(
-			&def.ID,
-			&def.FilePath,
-			&def.Content,
-			&importsJSON,
-			&servicesJSON,
-			&enumsJSON,
-			&def.CreatedAt,
-			&def.UpdatedAt,
-			&description,
-			&def.ServerProfileID,
-			&def.ProtoPathID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan proto definition: %w", err)
+	var defs []*proto.ProtoDefinition
+	for _, row := range rows {
+		var imports []string
+		_ = json.Unmarshal([]byte(row.Imports), &imports)
+		var services []proto.Service
+		_ = json.Unmarshal([]byte(row.Services), &services)
+		var enums []proto.EnumType
+		_ = json.Unmarshal([]byte(row.Enums), &enums)
+		createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
+		updatedAt, _ := time.Parse(time.RFC3339, row.UpdatedAt)
+		description := ""
+		if row.Description.Valid {
+			description = row.Description.String
 		}
-
-		// Unmarshal JSON fields
-		if err := json.Unmarshal([]byte(importsJSON), &def.Imports); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal imports: %w", err)
+		version := ""
+		if row.Version.Valid {
+			version = row.Version.String
 		}
-		if err := json.Unmarshal([]byte(servicesJSON), &def.Services); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal services: %w", err)
+		var lastParsed time.Time
+		if row.LastParsed.Valid {
+			lastParsed, _ = time.Parse(time.RFC3339, row.LastParsed.String)
 		}
-		if err := json.Unmarshal([]byte(enumsJSON), &def.Enums); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal enums: %w", err)
+		errorMsg := ""
+		if row.Error.Valid {
+			errorMsg = row.Error.String
 		}
-
-		if description.Valid {
-			def.Description = description.String
+		fileOptions := ""
+		if row.FileOptions.Valid {
+			fileOptions = row.FileOptions.String
 		}
-
-		definitions = append(definitions, &def)
+		defs = append(defs, &proto.ProtoDefinition{
+			ID:              row.ID,
+			FilePath:        row.FilePath,
+			Content:         row.Content,
+			Imports:         imports,
+			Services:        services,
+			CreatedAt:       createdAt,
+			UpdatedAt:       updatedAt,
+			Description:     description,
+			Version:         version,
+			ServerProfileID: row.ServerProfileID,
+			ProtoPathID:     row.ProtoPathID,
+			LastParsed:      lastParsed,
+			Error:           errorMsg,
+			Enums:           enums,
+			FileOptions:     fileOptions,
+		})
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating proto definition rows: %w", err)
-	}
-
-	fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Found %d definitions\n", len(definitions))
-	return definitions, nil
+	fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Found %d definitions\n", len(defs))
+	return defs, nil
 }
 
 // ListProtoDefinitionsByProtoPath lists proto definitions for a given proto path
 func (s *SQLiteStore) ListProtoDefinitionsByProtoPath(ctx context.Context, protoPathID string) ([]*proto.ProtoDefinition, error) {
 	var rows []struct {
-		ID              string `db:"id"`
-		FilePath        string `db:"file_path"`
-		Content         string `db:"content"`
-		Imports         string `db:"imports"`
-		Services        string `db:"services"`
-		CreatedAt       string `db:"created_at"`
-		UpdatedAt       string `db:"updated_at"`
-		Description     string `db:"description"`
-		Version         string `db:"version"`
-		ServerProfileID string `db:"server_profile_id"`
-		ProtoPathID     string `db:"proto_path_id"`
-		LastParsed      string `db:"last_parsed"`
-		Error           string `db:"error"`
-		Enums           string `db:"enums"`
-		FileOptions     string `db:"file_options"`
+		ID              string         `db:"id"`
+		FilePath        string         `db:"file_path"`
+		Content         string         `db:"content"`
+		Imports         string         `db:"imports"`
+		Services        string         `db:"services"`
+		CreatedAt       string         `db:"created_at"`
+		UpdatedAt       string         `db:"updated_at"`
+		Description     sql.NullString `db:"description"`
+		Version         sql.NullString `db:"version"`
+		ServerProfileID string         `db:"server_profile_id"`
+		ProtoPathID     string         `db:"proto_path_id"`
+		LastParsed      sql.NullString `db:"last_parsed"`
+		Error           sql.NullString `db:"error"`
+		Enums           string         `db:"enums"`
+		FileOptions     sql.NullString `db:"file_options"`
 	}
 	query := `SELECT * FROM proto_definitions WHERE proto_path_id = ?`
 	err := s.db.SelectContext(ctx, &rows, query, protoPathID)
@@ -682,7 +735,26 @@ func (s *SQLiteStore) ListProtoDefinitionsByProtoPath(ctx context.Context, proto
 		_ = json.Unmarshal([]byte(row.Enums), &enums)
 		createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
 		updatedAt, _ := time.Parse(time.RFC3339, row.UpdatedAt)
-		lastParsed, _ := time.Parse(time.RFC3339, row.LastParsed)
+		description := ""
+		if row.Description.Valid {
+			description = row.Description.String
+		}
+		version := ""
+		if row.Version.Valid {
+			version = row.Version.String
+		}
+		var lastParsed time.Time
+		if row.LastParsed.Valid {
+			lastParsed, _ = time.Parse(time.RFC3339, row.LastParsed.String)
+		}
+		errorMsg := ""
+		if row.Error.Valid {
+			errorMsg = row.Error.String
+		}
+		fileOptions := ""
+		if row.FileOptions.Valid {
+			fileOptions = row.FileOptions.String
+		}
 		defs = append(defs, &proto.ProtoDefinition{
 			ID:              row.ID,
 			FilePath:        row.FilePath,
@@ -691,14 +763,14 @@ func (s *SQLiteStore) ListProtoDefinitionsByProtoPath(ctx context.Context, proto
 			Services:        services,
 			CreatedAt:       createdAt,
 			UpdatedAt:       updatedAt,
-			Description:     row.Description,
-			Version:         row.Version,
+			Description:     description,
+			Version:         version,
 			ServerProfileID: row.ServerProfileID,
 			ProtoPathID:     row.ProtoPathID,
 			LastParsed:      lastParsed,
-			Error:           row.Error,
+			Error:           errorMsg,
 			Enums:           enums,
-			FileOptions:     row.FileOptions,
+			FileOptions:     fileOptions,
 		})
 	}
 	return defs, nil
