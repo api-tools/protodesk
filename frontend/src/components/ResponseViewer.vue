@@ -409,7 +409,7 @@ async function copyToClipboard() {
 
     <!-- Scrollable content -->
     <div class="content-container" style="flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; margin-top: 64px;">
-      <div v-if="props.sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2">{{ props.sendError }}</div>
+      <div v-if="props.sendError" class="bg-red-900 text-red-200 rounded p-2 mb-2 break-words whitespace-pre-wrap">{{ props.sendError }}</div>
       <div v-if="!props.sendLoading && !props.responseLoading && !props.sendError && props.responseData" 
            class="bg-[#232b36] rounded p-2 font-mono text-xs whitespace-pre-wrap response-content" 
            style="min-height: 120px; color: #b0bec5;" 

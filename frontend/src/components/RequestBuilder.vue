@@ -152,6 +152,25 @@ function disableNativeAutofill(event: Event) {
                     @focus="disableNativeAutofill"
                     @input="disableNativeAutofill"
                   />
+                  <div v-else-if="field.type === 'google.protobuf.Timestamp'" class="flex flex-col gap-2">
+                    <input
+                      type="datetime-local"
+                      class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
+                      :value="props.requestData[field.name] ? new Date(props.requestData[field.name].seconds * 1000).toISOString().slice(0, 16) : ''"
+                      @input="(e: Event) => {
+                        const target = e.target as HTMLInputElement;
+                        const date = new Date(target.value);
+                        if (isNaN(date.getTime())) {
+                          props.requestData[field.name] = null;
+                        } else {
+                          props.requestData[field.name] = {
+                            seconds: Math.floor(date.getTime() / 1000),
+                            nanos: 0
+                          };
+                        }
+                      }"
+                    />
+                  </div>
                   <span v-else-if="field.type === 'group'" class="italic text-[#b0bec5]">Group fields are not supported (legacy protobuf feature).</span>
                   <span v-else-if="field.type !== 'message'" class="italic text-[#b0bec5]">Unsupported type: {{ field.type }}</span>
                   <span v-else-if="field.type === 'message' && (!field.fields || field.fields.length === 0)" class="italic text-[#b0bec5]">Unsupported type: message</span>
@@ -205,6 +224,25 @@ function disableNativeAutofill(event: Event) {
               @focus="disableNativeAutofill"
               @input="disableNativeAutofill"
             />
+            <div v-else-if="field.type === 'google.protobuf.Timestamp'" class="flex flex-col gap-2">
+              <input
+                type="datetime-local"
+                class="w-full px-2 py-1 rounded bg-[#232b36] border border-[#2c3e50] text-white focus:outline-none text-[0.8rem] no-autofill"
+                :value="props.requestData[field.name] ? new Date(props.requestData[field.name].seconds * 1000).toISOString().slice(0, 16) : ''"
+                @input="(e: Event) => {
+                  const target = e.target as HTMLInputElement;
+                  const date = new Date(target.value);
+                  if (isNaN(date.getTime())) {
+                    props.requestData[field.name] = null;
+                  } else {
+                    props.requestData[field.name] = {
+                      seconds: Math.floor(date.getTime() / 1000),
+                      nanos: 0
+                    };
+                  }
+                }"
+              />
+            </div>
             <template v-else-if="field.type === 'message' && field.fields && field.fields.length > 0 && props.topLevelMessageExpanded[field.name]">
               <ProtoMessageField
                 :fields="field.fields"

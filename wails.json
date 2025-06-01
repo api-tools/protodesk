@@ -17,6 +17,6 @@
     "copyright": "© 2025 ProtoDesk Contributors",
     "comments": "A modern gRPC client desktop application"
   },
-  "debugmode": true,
+  "debugmode": false,
   "platforms": ["windows", "darwin", "linux"]
 }

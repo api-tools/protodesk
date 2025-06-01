@@ -10,15 +10,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jhump/protoreflect/grpcreflect"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+	reflectionpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
+
 	"protodesk/pkg/models"
 	"protodesk/pkg/models/proto"
 
 	"crypto/sha256"
 	"encoding/hex"
-
-	"github.com/google/uuid"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
 // ServerProfileManager handles server profile operations and maintains active connections
@@ -98,17 +100,79 @@ func (m *ServerProfileManager) Connect(ctx context.Context, profileID string) er
 			// Log the error but don't fail the connection
 			fmt.Printf("[WARN] Failed to list services via reflection: %v\n", err)
 		} else {
+			// Get the reflection client
+			rc := grpcreflect.NewClient(ctx, reflectionpb.NewServerReflectionClient(conn))
+			defer rc.Reset()
+
 			// Store the services in the database
 			for serviceName, methods := range services {
+				// Get the service descriptor
+				svcDesc, err := rc.ResolveService(serviceName)
+				if err != nil {
+					fmt.Printf("[WARN] Failed to resolve service %s: %v\n", serviceName, err)
+					continue
+				}
+
 				// Create a proto definition for each service
 				def := &proto.ProtoDefinition{
 					ID:              uuid.New().String(),
 					FilePath:        fmt.Sprintf("reflection/%s.proto", serviceName),
 					Content:         fmt.Sprintf("service %s {\n  // Methods: %v\n}", serviceName, methods),
 					Services:        []proto.Service{{Name: serviceName}},
+					Messages:        make([]proto.MessageType, 0),
+					Imports:         []string{"google/protobuf/timestamp.proto"},
 					CreatedAt:       time.Now(),
 					UpdatedAt:       time.Now(),
 					ServerProfileID: profileID,
+				}
+
+				// Extract message types from methods
+				for _, method := range methods {
+					// Get method descriptor
+					mDesc := svcDesc.FindMethodByName(method)
+					if mDesc == nil {
+						continue
+					}
+
+					// Get input type
+					inputType := mDesc.GetInputType()
+					if inputType != nil {
+						msg := proto.MessageType{
+							Name:   inputType.GetFullyQualifiedName(),
+							Fields: make([]proto.MessageField, 0),
+						}
+						// Only add if it's not already in the list
+						found := false
+						for _, existing := range def.Messages {
+							if existing.Name == msg.Name {
+								found = true
+								break
+							}
+						}
+						if !found {
+							def.Messages = append(def.Messages, msg)
+						}
+					}
+
+					// Get output type
+					outputType := mDesc.GetOutputType()
+					if outputType != nil {
+						msg := proto.MessageType{
+							Name:   outputType.GetFullyQualifiedName(),
+							Fields: make([]proto.MessageField, 0),
+						}
+						// Only add if it's not already in the list
+						found := false
+						for _, existing := range def.Messages {
+							if existing.Name == msg.Name {
+								found = true
+								break
+							}
+						}
+						if !found {
+							def.Messages = append(def.Messages, msg)
+						}
+					}
 				}
 
 				// Check if a proto definition with the same path already exists
@@ -246,21 +310,21 @@ func (m *ServerProfileManager) ListProtoDefinitionsByProfile(ctx context.Context
 		fmt.Printf("[DEBUG] Forcing parse of proto path: %s\n", protoPath.Path)
 		err := m.protoParser.ScanAndParseProtoPath(ctx, profileID, protoPath.ID, protoPath.Path)
 		if err != nil {
-			fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Failed to parse proto path %s: %v\n", protoPath.Path, err)
+			fmt.Printf("[ERROR] Failed to parse proto path %s: %v\n", protoPath.Path, err)
 			continue // Continue with other paths even if one fails
 		}
 
 		// Update the hash after successful parse
 		hash, err := calculateProtoPathHash(protoPath.Path)
 		if err != nil {
-			fmt.Printf("[DEBUG] Failed to calculate hash for %s: %v\n", protoPath.Path, err)
+			fmt.Printf("[ERROR] Failed to calculate hash for %s: %v\n", protoPath.Path, err)
 			continue
 		}
 
 		protoPath.Hash = hash
 		protoPath.LastScanned = time.Now()
 		if err := m.store.UpdateProtoPath(ctx, protoPath); err != nil {
-			fmt.Printf("[DEBUG] Failed to update proto path hash: %v\n", err)
+			fmt.Printf("[ERROR] Failed to update proto path hash: %v\n", err)
 		}
 	}
 

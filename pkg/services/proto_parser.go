@@ -193,7 +193,12 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 					// Find the message in the descriptor set
 					for _, msg := range descriptorSet.File {
 						for _, message := range msg.GetMessageType() {
-							if msg.GetPackage()+"."+message.GetName() == inputTypeName {
+							fullMessageName := msg.GetPackage()
+							if fullMessageName != "" {
+								fullMessageName += "."
+							}
+							fullMessageName += message.GetName()
+							if fullMessageName == inputTypeName {
 								inputType = proto.MessageType{
 									Name:   inputTypeName,
 									Fields: make([]proto.MessageField, 0),
@@ -204,6 +209,24 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 										fieldType = field.GetTypeName()
 										if strings.HasPrefix(fieldType, ".") {
 											fieldType = fieldType[1:]
+										}
+										// Handle Google well-known types
+										if strings.HasPrefix(fieldType, "google.protobuf.") {
+											// For well-known types, we need to keep the full type name
+											fieldType = fieldType
+											// Add the well-known type to imports if not already present
+											wellKnownType := strings.TrimPrefix(fieldType, "google.protobuf.")
+											wellKnownProto := fmt.Sprintf("google/protobuf/%s.proto", strings.ToLower(wellKnownType))
+											found := false
+											for _, imp := range def.Imports {
+												if imp == wellKnownProto {
+													found = true
+													break
+												}
+											}
+											if !found {
+												def.Imports = append(def.Imports, wellKnownProto)
+											}
 										}
 									} else if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
 										fieldType = field.GetTypeName()
@@ -239,7 +262,12 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 					// Find the message in the descriptor set
 					for _, msg := range descriptorSet.File {
 						for _, message := range msg.GetMessageType() {
-							if msg.GetPackage()+"."+message.GetName() == outputTypeName {
+							fullMessageName := msg.GetPackage()
+							if fullMessageName != "" {
+								fullMessageName += "."
+							}
+							fullMessageName += message.GetName()
+							if fullMessageName == outputTypeName {
 								outputType = proto.MessageType{
 									Name:   outputTypeName,
 									Fields: make([]proto.MessageField, 0),
@@ -250,6 +278,24 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 										fieldType = field.GetTypeName()
 										if strings.HasPrefix(fieldType, ".") {
 											fieldType = fieldType[1:]
+										}
+										// Handle Google well-known types
+										if strings.HasPrefix(fieldType, "google.protobuf.") {
+											// For well-known types, we need to keep the full type name
+											fieldType = fieldType
+											// Add the well-known type to imports if not already present
+											wellKnownType := strings.TrimPrefix(fieldType, "google.protobuf.")
+											wellKnownProto := fmt.Sprintf("google/protobuf/%s.proto", strings.ToLower(wellKnownType))
+											found := false
+											for _, imp := range def.Imports {
+												if imp == wellKnownProto {
+													found = true
+													break
+												}
+											}
+											if !found {
+												def.Imports = append(def.Imports, wellKnownProto)
+											}
 										}
 									} else if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
 										fieldType = field.GetTypeName()
@@ -322,8 +368,32 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 					fieldType := protoTypeToString(field.GetType())
 					if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
 						fieldType = field.GetTypeName()
+						if strings.HasPrefix(fieldType, ".") {
+							fieldType = fieldType[1:]
+						}
+						// Handle Google well-known types
+						if strings.HasPrefix(fieldType, "google.protobuf.") {
+							// For well-known types, we need to keep the full type name
+							fieldType = fieldType
+							// Add the well-known type to imports if not already present
+							wellKnownType := strings.TrimPrefix(fieldType, "google.protobuf.")
+							wellKnownProto := fmt.Sprintf("google/protobuf/%s.proto", strings.ToLower(wellKnownType))
+							found := false
+							for _, imp := range def.Imports {
+								if imp == wellKnownProto {
+									found = true
+									break
+								}
+							}
+							if !found {
+								def.Imports = append(def.Imports, wellKnownProto)
+							}
+						}
 					} else if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
 						fieldType = field.GetTypeName()
+						if strings.HasPrefix(fieldType, ".") {
+							fieldType = fieldType[1:]
+						}
 					}
 
 					msgField := proto.MessageField{
@@ -375,7 +445,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 			for _, d := range existingDefs {
 				normalizedExistingPath, _ := filepath.Abs(d.FilePath)
 				normalizedNewPath, _ := filepath.Abs(def.FilePath)
-				fmt.Printf("[DEBUG] Comparing file paths - existing: %s, new: %s\n", normalizedExistingPath, normalizedNewPath)
 				if normalizedExistingPath == normalizedNewPath {
 					existingDef = d
 					break
@@ -386,6 +455,20 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				fmt.Printf("[DEBUG] Found existing definition, updating...\n")
 				def.ID = existingDef.ID
 				def.CreatedAt = existingDef.CreatedAt
+				// Delete any duplicate definitions with the same file path
+				for _, d := range existingDefs {
+					if d.ID != existingDef.ID {
+						normalizedExistingPath, _ := filepath.Abs(d.FilePath)
+						normalizedNewPath, _ := filepath.Abs(def.FilePath)
+						if normalizedExistingPath == normalizedNewPath {
+							fmt.Printf("[DEBUG] Deleting duplicate definition with ID: %s\n", d.ID)
+							err = p.store.DeleteProtoDefinition(ctx, d.ID)
+							if err != nil {
+								fmt.Printf("[DEBUG] Failed to delete duplicate definition: %v\n", err)
+							}
+						}
+					}
+				}
 				err = p.store.UpdateProtoDefinition(ctx, def)
 				if err != nil {
 					fmt.Printf("[DEBUG] Failed to update proto definition: %v\n", err)
@@ -405,6 +488,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 		}
 	}
 
-	fmt.Printf("[DEBUG] Successfully parsed and saved %d proto definitions out of %d files\n", successfullyParsed, len(protoFiles))
+	fmt.Printf("[INFO] Successfully parsed and saved %d proto definitions out of %d files\n", successfullyParsed, len(protoFiles))
 	return nil
 }
