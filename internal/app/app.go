@@ -569,7 +569,8 @@ func (a *App) CallGRPCMethod(
 		}
 		outType := mDesc.GetOutputType()
 		respMsg := dynamic.NewMessage(outType)
-		methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+		// Use the full service name from the service descriptor
+		methodFullName := fmt.Sprintf("/%s/%s", svcDesc.GetFullyQualifiedName(), methodName)
 		err = conn.Invoke(ctx, methodFullName, reqMsg, respMsg)
 		if err != nil {
 			return "", fmt.Errorf("gRPC call failed: %w", err)

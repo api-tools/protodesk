@@ -171,8 +171,14 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 
 			// Extract services and methods
 			for _, service := range fileDesc.GetService() {
+				// Get the full service name including package
+				serviceName := service.GetName()
+				if fileDesc.GetPackage() != "" {
+					serviceName = fileDesc.GetPackage() + "." + serviceName
+				}
+
 				svc := proto.Service{
-					Name:    service.GetName(),
+					Name:    serviceName,
 					Methods: make([]proto.Method, 0),
 				}
 
