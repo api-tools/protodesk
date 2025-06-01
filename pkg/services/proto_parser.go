@@ -177,10 +177,102 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				}
 
 				for _, method := range service.GetMethod() {
+					// Find input message type
+					var inputType proto.MessageType
+					inputTypeName := method.GetInputType()
+					// Remove the leading dot if present
+					if strings.HasPrefix(inputTypeName, ".") {
+						inputTypeName = inputTypeName[1:]
+					}
+					// Find the message in the descriptor set
+					for _, msg := range descriptorSet.File {
+						for _, message := range msg.GetMessageType() {
+							if msg.GetPackage()+"."+message.GetName() == inputTypeName {
+								inputType = proto.MessageType{
+									Name:   inputTypeName,
+									Fields: make([]proto.MessageField, 0),
+								}
+								for _, field := range message.GetField() {
+									fieldType := protoTypeToString(field.GetType())
+									if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+										fieldType = field.GetTypeName()
+										if strings.HasPrefix(fieldType, ".") {
+											fieldType = fieldType[1:]
+										}
+									} else if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
+										fieldType = field.GetTypeName()
+										if strings.HasPrefix(fieldType, ".") {
+											fieldType = fieldType[1:]
+										}
+									}
+
+									msgField := proto.MessageField{
+										Name:       field.GetName(),
+										Number:     int32(field.GetNumber()),
+										Type:       fieldType,
+										IsRepeated: field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED,
+										IsRequired: field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REQUIRED,
+										Options: proto.FieldOption{
+											JSONName: field.GetJsonName(),
+										},
+									}
+									inputType.Fields = append(inputType.Fields, msgField)
+								}
+								break
+							}
+						}
+					}
+
+					// Find output message type
+					var outputType proto.MessageType
+					outputTypeName := method.GetOutputType()
+					// Remove the leading dot if present
+					if strings.HasPrefix(outputTypeName, ".") {
+						outputTypeName = outputTypeName[1:]
+					}
+					// Find the message in the descriptor set
+					for _, msg := range descriptorSet.File {
+						for _, message := range msg.GetMessageType() {
+							if msg.GetPackage()+"."+message.GetName() == outputTypeName {
+								outputType = proto.MessageType{
+									Name:   outputTypeName,
+									Fields: make([]proto.MessageField, 0),
+								}
+								for _, field := range message.GetField() {
+									fieldType := protoTypeToString(field.GetType())
+									if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+										fieldType = field.GetTypeName()
+										if strings.HasPrefix(fieldType, ".") {
+											fieldType = fieldType[1:]
+										}
+									} else if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
+										fieldType = field.GetTypeName()
+										if strings.HasPrefix(fieldType, ".") {
+											fieldType = fieldType[1:]
+										}
+									}
+
+									msgField := proto.MessageField{
+										Name:       field.GetName(),
+										Number:     int32(field.GetNumber()),
+										Type:       fieldType,
+										IsRepeated: field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED,
+										IsRequired: field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REQUIRED,
+										Options: proto.FieldOption{
+											JSONName: field.GetJsonName(),
+										},
+									}
+									outputType.Fields = append(outputType.Fields, msgField)
+								}
+								break
+							}
+						}
+					}
+
 					svc.Methods = append(svc.Methods, proto.Method{
 						Name:            method.GetName(),
-						InputType:       proto.MessageType{Name: method.GetInputType()},
-						OutputType:      proto.MessageType{Name: method.GetOutputType()},
+						InputType:       inputType,
+						OutputType:      outputType,
 						ClientStreaming: method.GetClientStreaming(),
 						ServerStreaming: method.GetServerStreaming(),
 					})
@@ -212,6 +304,40 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 			}
 
 			fmt.Printf("[DEBUG] Found %d enums\n", len(def.Enums))
+
+			// Extract messages
+			for _, message := range fileDesc.GetMessageType() {
+				msgType := proto.MessageType{
+					Name:   message.GetName(),
+					Fields: make([]proto.MessageField, 0),
+				}
+
+				for _, field := range message.GetField() {
+					fieldType := protoTypeToString(field.GetType())
+					if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE {
+						fieldType = field.GetTypeName()
+					} else if field.GetType() == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
+						fieldType = field.GetTypeName()
+					}
+
+					msgField := proto.MessageField{
+						Name:       field.GetName(),
+						Number:     int32(field.GetNumber()),
+						Type:       fieldType,
+						IsRepeated: field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED,
+						IsRequired: field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REQUIRED,
+						Options: proto.FieldOption{
+							JSONName: field.GetJsonName(),
+						},
+					}
+
+					msgType.Fields = append(msgType.Fields, msgField)
+				}
+
+				def.Messages = append(def.Messages, msgType)
+			}
+
+			fmt.Printf("[DEBUG] Found %d messages\n", len(def.Messages))
 
 			// Extract file options
 			if opts := fileDesc.GetOptions(); opts != nil {
