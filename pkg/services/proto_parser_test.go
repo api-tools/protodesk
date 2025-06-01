@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -171,9 +172,14 @@ enum TestEnum {
 		mockStore = new(MockServerProfileStore)
 		parser = NewProtoParser(mockStore)
 
+		// Remove leading slash to match parser's fileDesc.GetName()
+		relPath := testProtoPath
+		if strings.HasPrefix(relPath, "/") {
+			relPath = relPath[1:]
+		}
 		existingDef := &proto.ProtoDefinition{
 			ID:              "existing-id",
-			FilePath:        testProtoPath, // Use the full path to match parser output
+			FilePath:        relPath, // Match parser's fileDesc.GetName()
 			ServerProfileID: serverProfileId,
 			ProtoPathID:     protoPathId,
 		}
@@ -181,7 +187,7 @@ enum TestEnum {
 		// Set up mock expectations
 		mockStore.On("ListProtoDefinitionsByProfile", ctx, serverProfileId).Return([]*proto.ProtoDefinition{existingDef}, nil)
 		mockStore.On("UpdateProtoDefinition", ctx, mock.MatchedBy(func(def *proto.ProtoDefinition) bool {
-			return def.FilePath == testProtoPath && def.ServerProfileID == serverProfileId && def.ProtoPathID == protoPathId
+			return def.FilePath == relPath && def.ServerProfileID == serverProfileId && def.ProtoPathID == protoPathId
 		})).Return(nil)
 
 		// Execute test

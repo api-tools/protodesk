@@ -10,3 +10,4 @@ type ProtoPath struct {
 	Hash            string    // Hash of the proto files in this path
 	LastScanned     time.Time // When this path was last scanned
 }
+ 

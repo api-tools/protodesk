@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -111,7 +112,7 @@ func (p *Parser) parseFileWithVisitedGraph(filePath string, visited map[string]b
 	for i := 0; i < services.Len(); i++ {
 		svc := services.Get(i)
 		service := Service{
-			Name:        string(svc.Name()),
+			Name:        string(svc.FullName()),
 			Description: p.extractComments(svc.ParentFile(), int32(svc.Index())),
 		}
 
@@ -127,15 +128,29 @@ func (p *Parser) parseFileWithVisitedGraph(filePath string, visited map[string]b
 			}
 
 			// Extract input type
-			methodDesc.InputType = p.extractMessageType(method.Input())
+			inputType := method.Input()
+			if inputType != nil {
+				methodDesc.InputType = p.extractMessageType(inputType)
+			}
 
 			// Extract output type
-			methodDesc.OutputType = p.extractMessageType(method.Output())
+			outputType := method.Output()
+			if outputType != nil {
+				methodDesc.OutputType = p.extractMessageType(outputType)
+			}
 
 			service.Methods = append(service.Methods, methodDesc)
 		}
 
 		pd.AddService(service)
+	}
+
+	// Extract messages
+	messages := fileDesc.Messages()
+	for i := 0; i < messages.Len(); i++ {
+		msg := messages.Get(i)
+		messageType := p.extractMessageType(msg)
+		pd.Messages = append(pd.Messages, messageType)
 	}
 
 	return pd, nil
@@ -308,10 +323,12 @@ func (p *Parser) resolveImport(importPath string) (*descriptorpb.FileDescriptorP
 // extractMessageType extracts message type information from a MessageDescriptor
 func (p *Parser) extractMessageType(msg protoreflect.MessageDescriptor) MessageType {
 	mt := MessageType{
-		Name:        string(msg.Name()),
+		Name:        string(msg.FullName()),
 		Description: p.extractComments(msg.ParentFile(), int32(msg.Index())),
+		Fields:      make([]MessageField, 0),
 	}
 
+	// Get all fields from the message
 	fields := msg.Fields()
 	for i := 0; i < fields.Len(); i++ {
 		field := fields.Get(i)
@@ -326,6 +343,19 @@ func (p *Parser) extractMessageType(msg protoreflect.MessageDescriptor) MessageT
 				JSONName: string(field.JSONName()),
 			},
 		}
+
+		// If this is a message type, recursively extract its fields
+		if field.Kind() == protoreflect.MessageKind {
+			msgType := field.Message()
+			if msgType != nil {
+				// Only extract fields if it's not a well-known type
+				if !strings.HasPrefix(string(msgType.FullName()), "google.protobuf.") {
+					nestedMsg := p.extractMessageType(msgType)
+					mf.Type = nestedMsg.Name
+				}
+			}
+		}
+
 		mt.Fields = append(mt.Fields, mf)
 	}
 
@@ -342,9 +372,9 @@ func (p *Parser) getFieldTypeName(field protoreflect.FieldDescriptor) string {
 
 	switch field.Kind() {
 	case protoreflect.MessageKind, protoreflect.GroupKind:
-		return string(field.Message().Name())
+		return string(field.Message().FullName())
 	case protoreflect.EnumKind:
-		return string(field.Enum().Name())
+		return string(field.Enum().FullName())
 	default:
 		return field.Kind().String()
 	}

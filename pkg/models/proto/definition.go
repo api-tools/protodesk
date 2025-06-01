@@ -9,19 +9,20 @@ import (
 
 // ProtoDefinition represents a parsed Protocol Buffer definition file
 type ProtoDefinition struct {
-	ID              string    `json:"id"`              // Unique identifier
-	FilePath        string    `json:"filePath"`        // Path to the proto file
-	Content         string    `json:"content"`         // Raw content of the proto file
-	Imports         []string  `json:"imports"`         // List of imported proto files
-	Services        []Service `json:"services"`        // List of services defined in the proto
-	CreatedAt       time.Time `json:"createdAt"`       // Creation timestamp
-	UpdatedAt       time.Time `json:"updatedAt"`       // Last update timestamp
-	Description     string    `json:"description"`     // Optional description
-	Version         string    `json:"version"`         // Version of the proto definition
-	ServerProfileID string    `json:"serverProfileId"` // Linked server profile ID
-	ProtoPathID     string    `json:"protoPathId"`     // Linked proto path ID
-	LastParsed      time.Time `json:"lastParsed"`      // Last parsed timestamp
-	Error           string    `json:"error"`           // Parsing/validation error, if any
+	ID              string        `json:"id"`              // Unique identifier
+	FilePath        string        `json:"filePath"`        // Path to the proto file
+	Content         string        `json:"content"`         // Raw content of the proto file
+	Imports         []string      `json:"imports"`         // List of imported proto files
+	Services        []Service     `json:"services"`        // List of services defined in the proto
+	Messages        []MessageType `json:"messages"`        // List of messages defined in the proto
+	CreatedAt       time.Time     `json:"createdAt"`       // Creation timestamp
+	UpdatedAt       time.Time     `json:"updatedAt"`       // Last update timestamp
+	Description     string        `json:"description"`     // Optional description
+	Version         string        `json:"version"`         // Version of the proto definition
+	ServerProfileID string        `json:"serverProfileId"` // Linked server profile ID
+	ProtoPathID     string        `json:"protoPathId"`     // Linked proto path ID
+	LastParsed      time.Time     `json:"lastParsed"`      // Last parsed timestamp
+	Error           string        `json:"error"`           // Parsing/validation error, if any
 
 	// New fields for enums and file options
 	Enums       []EnumType `json:"enums"`       // List of enums defined in the proto
@@ -97,6 +98,7 @@ func NewProtoDefinition(filePath string, content string) *ProtoDefinition {
 		CreatedAt: now,
 		UpdatedAt: now,
 		Version:   "1", // Starting with version 1
+		Messages:  make([]MessageType, 0),
 	}
 }
 

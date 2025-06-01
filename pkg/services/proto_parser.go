@@ -241,7 +241,10 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 
 			var existingDef *proto.ProtoDefinition
 			for _, d := range existingDefs {
-				if d.FilePath == def.FilePath {
+				normalizedExistingPath, _ := filepath.Abs(d.FilePath)
+				normalizedNewPath, _ := filepath.Abs(def.FilePath)
+				fmt.Printf("[DEBUG] Comparing file paths - existing: %s, new: %s\n", normalizedExistingPath, normalizedNewPath)
+				if normalizedExistingPath == normalizedNewPath {
 					existingDef = d
 					break
 				}

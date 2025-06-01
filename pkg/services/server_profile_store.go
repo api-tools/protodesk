@@ -114,6 +114,7 @@ func initializeSchema(db *sqlx.DB) error {
 		content TEXT NOT NULL,
 		imports TEXT,
 		services TEXT,
+		messages TEXT,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		description TEXT,
@@ -359,7 +360,7 @@ func (s *SQLiteStore) CreateProtoDefinition(ctx context.Context, def *proto.Prot
 	}
 	defer tx.Rollback()
 
-	// Marshal imports, services, and enums to JSON
+	// Marshal imports, services, messages, and enums to JSON
 	importsJSON, err := json.Marshal(def.Imports)
 	if err != nil {
 		return fmt.Errorf("failed to marshal imports: %w", err)
@@ -370,6 +371,11 @@ func (s *SQLiteStore) CreateProtoDefinition(ctx context.Context, def *proto.Prot
 		return fmt.Errorf("failed to marshal services: %w", err)
 	}
 
+	messagesJSON, err := json.Marshal(def.Messages)
+	if err != nil {
+		return fmt.Errorf("failed to marshal messages: %w", err)
+	}
+
 	enumsJSON, err := json.Marshal(def.Enums)
 	if err != nil {
 		return fmt.Errorf("failed to marshal enums: %w", err)
@@ -378,15 +384,16 @@ func (s *SQLiteStore) CreateProtoDefinition(ctx context.Context, def *proto.Prot
 	// Insert the proto definition
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO proto_definitions (
-			id, file_path, content, imports, services, enums,
+			id, file_path, content, imports, services, messages, enums,
 			created_at, updated_at, description, server_profile_id, proto_path_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		def.ID,
 		def.FilePath,
 		def.Content,
 		string(importsJSON),
 		string(servicesJSON),
+		string(messagesJSON),
 		string(enumsJSON),
 		def.CreatedAt,
 		def.UpdatedAt,
@@ -414,6 +421,7 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 		Content         string         `db:"content"`
 		Imports         string         `db:"imports"`
 		Services        string         `db:"services"`
+		Messages        string         `db:"messages"`
 		CreatedAt       string         `db:"created_at"`
 		UpdatedAt       string         `db:"updated_at"`
 		Description     sql.NullString `db:"description"`
@@ -434,6 +442,8 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 	_ = json.Unmarshal([]byte(row.Imports), &imports)
 	var services []proto.Service
 	_ = json.Unmarshal([]byte(row.Services), &services)
+	var messages []proto.MessageType
+	_ = json.Unmarshal([]byte(row.Messages), &messages)
 	var enums []proto.EnumType
 	_ = json.Unmarshal([]byte(row.Enums), &enums)
 	createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
@@ -464,6 +474,7 @@ func (s *SQLiteStore) GetProtoDefinition(ctx context.Context, id string) (*proto
 		Content:         row.Content,
 		Imports:         imports,
 		Services:        services,
+		Messages:        messages,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		Description:     description,
@@ -484,6 +495,7 @@ func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoD
 		Content         string         `db:"content"`
 		Imports         string         `db:"imports"`
 		Services        string         `db:"services"`
+		Messages        string         `db:"messages"`
 		CreatedAt       string         `db:"created_at"`
 		UpdatedAt       string         `db:"updated_at"`
 		Description     sql.NullString `db:"description"`
@@ -506,6 +518,8 @@ func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoD
 		_ = json.Unmarshal([]byte(row.Imports), &imports)
 		var services []proto.Service
 		_ = json.Unmarshal([]byte(row.Services), &services)
+		var messages []proto.MessageType
+		_ = json.Unmarshal([]byte(row.Messages), &messages)
 		var enums []proto.EnumType
 		_ = json.Unmarshal([]byte(row.Enums), &enums)
 		createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
@@ -536,6 +550,7 @@ func (s *SQLiteStore) ListProtoDefinitions(ctx context.Context) ([]*proto.ProtoD
 			Content:         row.Content,
 			Imports:         imports,
 			Services:        services,
+			Messages:        messages,
 			CreatedAt:       createdAt,
 			UpdatedAt:       updatedAt,
 			Description:     description,
@@ -561,7 +576,7 @@ func (s *SQLiteStore) UpdateProtoDefinition(ctx context.Context, def *proto.Prot
 	}
 	defer tx.Rollback()
 
-	// Marshal imports, services, and enums to JSON
+	// Marshal imports, services, messages, and enums to JSON
 	importsJSON, err := json.Marshal(def.Imports)
 	if err != nil {
 		return fmt.Errorf("failed to marshal imports: %w", err)
@@ -572,6 +587,11 @@ func (s *SQLiteStore) UpdateProtoDefinition(ctx context.Context, def *proto.Prot
 		return fmt.Errorf("failed to marshal services: %w", err)
 	}
 
+	messagesJSON, err := json.Marshal(def.Messages)
+	if err != nil {
+		return fmt.Errorf("failed to marshal messages: %w", err)
+	}
+
 	enumsJSON, err := json.Marshal(def.Enums)
 	if err != nil {
 		return fmt.Errorf("failed to marshal enums: %w", err)
@@ -580,7 +600,7 @@ func (s *SQLiteStore) UpdateProtoDefinition(ctx context.Context, def *proto.Prot
 	// Update the proto definition
 	_, err = tx.ExecContext(ctx, `
 		UPDATE proto_definitions
-		SET file_path = ?, content = ?, imports = ?, services = ?, enums = ?,
+		SET file_path = ?, content = ?, imports = ?, services = ?, messages = ?, enums = ?,
 			updated_at = ?, description = ?, server_profile_id = ?, proto_path_id = ?
 		WHERE id = ?
 	`,
@@ -588,6 +608,7 @@ func (s *SQLiteStore) UpdateProtoDefinition(ctx context.Context, def *proto.Prot
 		def.Content,
 		string(importsJSON),
 		string(servicesJSON),
+		string(messagesJSON),
 		string(enumsJSON),
 		def.UpdatedAt,
 		sql.NullString{String: def.Description, Valid: def.Description != ""},
@@ -633,6 +654,7 @@ func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profile
 		Content         string         `db:"content"`
 		Imports         string         `db:"imports"`
 		Services        string         `db:"services"`
+		Messages        string         `db:"messages"`
 		CreatedAt       string         `db:"created_at"`
 		UpdatedAt       string         `db:"updated_at"`
 		Description     sql.NullString `db:"description"`
@@ -655,6 +677,8 @@ func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profile
 		_ = json.Unmarshal([]byte(row.Imports), &imports)
 		var services []proto.Service
 		_ = json.Unmarshal([]byte(row.Services), &services)
+		var messages []proto.MessageType
+		_ = json.Unmarshal([]byte(row.Messages), &messages)
 		var enums []proto.EnumType
 		_ = json.Unmarshal([]byte(row.Enums), &enums)
 		createdAt, _ := time.Parse(time.RFC3339, row.CreatedAt)
@@ -685,6 +709,7 @@ func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profile
 			Content:         row.Content,
 			Imports:         imports,
 			Services:        services,
+			Messages:        messages,
 			CreatedAt:       createdAt,
 			UpdatedAt:       updatedAt,
 			Description:     description,
