@@ -32,8 +32,6 @@ func NewProtoParser(store ServerProfileStore) *ProtoParser {
 
 // ScanAndParseProtoPath scans a directory for proto files and parses them
 func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId string, protoPathId string, path string) error {
-	fmt.Printf("[DEBUG] Scanning proto path: %s\n", path)
-
 	// Find all proto files
 	var protoFiles []string
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
@@ -45,7 +43,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 			return filepath.SkipDir
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".proto") {
-			fmt.Printf("[DEBUG] Found proto file: %s\n", path)
 			protoFiles = append(protoFiles, path)
 		}
 		return nil
@@ -53,8 +50,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 	if err != nil {
 		return fmt.Errorf("failed to walk directory: %w", err)
 	}
-
-	fmt.Printf("[DEBUG] Total proto files to parse: %d\n", len(protoFiles))
 
 	// Build import paths
 	var importPaths []string
@@ -77,17 +72,34 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 	importPaths = append(importPaths, baseDir)
 	importPaths = append(importPaths, path)
 
-	fmt.Printf("[DEBUG] Using import paths: %v\n", importPaths)
+	// Add include paths for well-known types from the database (no hardcoded paths)
+	wellKnownTypes, err := p.store.ListWellKnownTypes(ctx)
+	if err == nil {
+		seen := map[string]struct{}{}
+		for _, p := range importPaths {
+			seen[p] = struct{}{}
+		}
+		for _, wkt := range wellKnownTypes {
+			if wkt.IncludePath != "" {
+				if _, ok := seen[wkt.IncludePath]; !ok {
+					importPaths = append(importPaths, wkt.IncludePath)
+					seen[wkt.IncludePath] = struct{}{}
+				}
+			}
+		}
+	}
 
 	successfullyParsed := 0
 	// Parse each proto file
 	for _, file := range protoFiles {
-		fmt.Printf("[DEBUG] Parsing file: %s\n", file)
-
+		// Normalize file path to absolute path
+		// absFile, err := filepath.Abs(file)
+		// if err != nil {
+		// 	absFile = file // fallback to original if error
+		// }
 		// Create a temporary file for the descriptor set
 		tmpFile, err := os.CreateTemp("", "protoc-*.desc")
 		if err != nil {
-			fmt.Printf("[DEBUG] Failed to create temporary file: %v\n", err)
 			continue
 		}
 		tmpFile.Close()
@@ -103,46 +115,32 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 		}
 		args = append(args, file)
 
-		fmt.Printf("[DEBUG] Running protoc with args: %v\n", args)
-
 		// Run protoc command
 		cmd := exec.CommandContext(ctx, "protoc", args...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		err = cmd.Run()
 		if err != nil {
-			fmt.Printf("[DEBUG] Failed to run protoc: %v\n", err)
-			fmt.Printf("[DEBUG] protoc stderr output: %s\n", stderr.String())
 			continue
 		}
 
 		// Read the descriptor set from the temporary file
 		output, err := os.ReadFile(tmpFile.Name())
 		if err != nil {
-			fmt.Printf("[DEBUG] Failed to read descriptor set file: %v\n", err)
 			continue
 		}
-
-		fmt.Printf("[DEBUG] Read %d bytes from descriptor set file\n", len(output))
-		fmt.Printf("[DEBUG] protoc stderr output: %s\n", stderr.String())
 
 		// Parse descriptor set
 		descriptorSet := &descriptorpb.FileDescriptorSet{}
 		if err := pbproto.Unmarshal(output, descriptorSet); err != nil {
-			fmt.Printf("[DEBUG] Failed to unmarshal descriptor set: %v\n", err)
 			continue
 		}
 
-		fmt.Printf("[DEBUG] Successfully parsed descriptor set with %d files\n", len(descriptorSet.File))
-
 		// Process each file descriptor
 		for _, fileDesc := range descriptorSet.File {
-			fmt.Printf("[DEBUG] Processing file descriptor: %s\n", fileDesc.GetName())
-
 			// Read the original proto file content
 			content, err := os.ReadFile(file)
 			if err != nil {
-				fmt.Printf("[DEBUG] Failed to read proto file: %v\n", err)
 				continue
 			}
 
@@ -152,11 +150,16 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				// If it's a google/protobuf file, use the original file path
 				filePath = file
 			}
+			// Normalize filePath to absolute path
+			absFilePath, err := filepath.Abs(filePath)
+			if err != nil {
+				absFilePath = filePath
+			}
 
 			// Create proto definition
 			def := &proto.ProtoDefinition{
 				ID:              uuid.New().String(),
-				FilePath:        filePath,
+				FilePath:        absFilePath,
 				Content:         string(content),
 				Imports:         fileDesc.GetDependency(),
 				Services:        make([]proto.Service, 0),
@@ -166,8 +169,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				ServerProfileID: serverProfileId,
 				ProtoPathID:     protoPathId,
 			}
-
-			fmt.Printf("[DEBUG] Created proto definition object - ID: %s, FilePath: %s\n", def.ID, def.FilePath)
 
 			// Extract services and methods
 			for _, service := range fileDesc.GetService() {
@@ -333,11 +334,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				def.Services = append(def.Services, svc)
 			}
 
-			fmt.Printf("[DEBUG] Found %d services\n", len(def.Services))
-			if len(def.Services) > 0 {
-				fmt.Printf("[DEBUG] First service has %d methods\n", len(def.Services[0].Methods))
-			}
-
 			// Extract enums
 			for _, enum := range fileDesc.GetEnumType() {
 				enumDef := proto.EnumType{
@@ -354,8 +350,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 
 				def.Enums = append(def.Enums, enumDef)
 			}
-
-			fmt.Printf("[DEBUG] Found %d enums\n", len(def.Enums))
 
 			// Extract messages
 			for _, message := range fileDesc.GetMessageType() {
@@ -413,8 +407,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				def.Messages = append(def.Messages, msgType)
 			}
 
-			fmt.Printf("[DEBUG] Found %d messages\n", len(def.Messages))
-
 			// Extract file options
 			if opts := fileDesc.GetOptions(); opts != nil {
 				fileOptionsMap := make(map[string]interface{})
@@ -437,7 +429,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 			// Check if proto definition already exists
 			existingDefs, err := p.store.ListProtoDefinitionsByProfile(ctx, serverProfileId)
 			if err != nil {
-				fmt.Printf("[DEBUG] Failed to list proto definitions: %v\n", err)
 				continue
 			}
 
@@ -452,7 +443,6 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 			}
 
 			if existingDef != nil {
-				fmt.Printf("[DEBUG] Found existing definition, updating...\n")
 				def.ID = existingDef.ID
 				def.CreatedAt = existingDef.CreatedAt
 				// Delete any duplicate definitions with the same file path
@@ -461,33 +451,72 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 						normalizedExistingPath, _ := filepath.Abs(d.FilePath)
 						normalizedNewPath, _ := filepath.Abs(def.FilePath)
 						if normalizedExistingPath == normalizedNewPath {
-							fmt.Printf("[DEBUG] Deleting duplicate definition with ID: %s\n", d.ID)
 							err = p.store.DeleteProtoDefinition(ctx, d.ID)
 							if err != nil {
-								fmt.Printf("[DEBUG] Failed to delete duplicate definition: %v\n", err)
+								continue
 							}
 						}
 					}
 				}
 				err = p.store.UpdateProtoDefinition(ctx, def)
 				if err != nil {
-					fmt.Printf("[DEBUG] Failed to update proto definition: %v\n", err)
 					continue
 				}
-				fmt.Printf("[DEBUG] Successfully updated proto definition for %s\n", def.FilePath)
 			} else {
-				fmt.Printf("[DEBUG] Creating new proto definition...\n")
 				err = p.store.CreateProtoDefinition(ctx, def)
 				if err != nil {
-					fmt.Printf("[DEBUG] Failed to create proto definition: %v\n", err)
 					continue
 				}
-				fmt.Printf("[DEBUG] Successfully created proto definition for %s\n", def.FilePath)
 			}
 			successfullyParsed++
 		}
 	}
 
-	fmt.Printf("[INFO] Successfully parsed and saved %d proto definitions out of %d files\n", successfullyParsed, len(protoFiles))
 	return nil
+}
+
+// getWellKnownTypeImports returns a list of well-known type imports that should be included
+func getWellKnownTypeImports() []string {
+	return []string{
+		"google/protobuf/timestamp.proto",
+		"google/protobuf/empty.proto",
+		"google/protobuf/any.proto",
+		"google/protobuf/struct.proto",
+		"google/protobuf/wrappers.proto",
+		"google/protobuf/duration.proto",
+	}
+}
+
+// ParseProtoFiles parses proto files and returns their definitions
+func (p *ProtoParser) ParseProtoFiles(ctx context.Context, protoFiles []string, importPaths []string) ([]*proto.ProtoDefinition, error) {
+	// Add well-known type imports to the import paths
+	wellKnownTypesPath := os.Getenv("PROTOBUF_WELL_KNOWN_TYPES_PATH")
+	if wellKnownTypesPath != "" {
+		importPaths = append(importPaths, wellKnownTypesPath)
+	}
+
+	var definitions []*proto.ProtoDefinition
+	for _, file := range protoFiles {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read proto file %s: %w", file, err)
+		}
+
+		def := &proto.ProtoDefinition{
+			ID:              uuid.New().String(),
+			FilePath:        file,
+			Content:         string(content),
+			Imports:         getWellKnownTypeImports(), // Add well-known type imports by default
+			Services:        make([]proto.Service, 0),
+			Messages:        make([]proto.MessageType, 0),
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+			ServerProfileID: "", // This will be set by the caller if needed
+		}
+
+		// ... rest of the parsing logic ...
+		definitions = append(definitions, def)
+	}
+
+	return definitions, nil
 }

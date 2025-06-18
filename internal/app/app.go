@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,12 +17,19 @@ import (
 	"protodesk/pkg/models/proto"
 	"protodesk/pkg/services"
 
+	"github.com/jhump/protoreflect/desc"
+	"github.com/jhump/protoreflect/desc/protoparse"
 	"github.com/jhump/protoreflect/dynamic"
 	"github.com/jhump/protoreflect/grpcreflect"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	reflectpb "google.golang.org/grpc/reflection/grpc_reflection_v1alpha"
+	"google.golang.org/protobuf/encoding/prototext"
+	goproto "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 // App struct represents the main application
@@ -62,6 +70,21 @@ func (a *App) Startup(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize server profile store: %w", err)
 	}
 	fmt.Println("[Startup] Server profile store initialized")
+
+	// Detect and store well-known types
+	wellKnownTypesManager := services.NewWellKnownTypesManager(store)
+	if err := wellKnownTypesManager.DetectAndStoreWellKnownTypes(ctx); err != nil {
+		fmt.Printf("[WARN] Failed to detect well-known types: %v\n", err)
+	} else {
+		fmt.Println("[Startup] Well-known types detected and stored.")
+	}
+
+	// Register well-known types with the protobuf global registry
+	if err := RegisterWellKnownTypesFromDB(ctx, store); err != nil {
+		fmt.Printf("[WARN] Failed to register well-known types: %v\n", err)
+	} else {
+		fmt.Println("[Startup] Well-known types registered with protobuf global registry.")
+	}
 
 	a.profileManager = services.NewServerProfileManager(store)
 	fmt.Println("[Startup] profileManager initialized successfully")
@@ -283,6 +306,25 @@ func (a *App) CreateProtoPath(id, serverProfileId, path string) error {
 		return err
 	}
 
+	// Preprocess proto definitions to remove self-imports (direct cycles)
+	protoDefs, err := a.profileManager.ListProtoDefinitionsByProfile(context.Background(), serverProfileId)
+	if err != nil {
+		return err
+	}
+	for i, def := range protoDefs {
+		lines := strings.Split(def.Content, "\n")
+		var newLines []string
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "import ") && strings.Contains(trimmed, def.FilePath) {
+				fmt.Printf("[WARN] Ignoring self-import in %s: %s\n", def.FilePath, trimmed)
+				continue // skip this line
+			}
+			newLines = append(newLines, line)
+		}
+		protoDefs[i].Content = strings.Join(newLines, "\n")
+	}
+
 	return nil
 }
 
@@ -391,6 +433,310 @@ func (a *App) CallGRPCMethod(
 	requestJSON string,
 	headersJSON string,
 ) (string, error) {
+	// 0. Get server profile
+	profile, err := a.profileManager.GetStore().Get(a.ctx, profileID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get server profile: %w", err)
+	}
+
+	if !profile.UseReflection {
+		fmt.Printf("[DEBUG] Using local proto definitions for server %s\n", profileID)
+		ctx := context.Background()
+		protoDefs, err := a.profileManager.GetStore().ListProtoDefinitionsByProfile(ctx, profileID)
+		if err != nil {
+			return "", fmt.Errorf("failed to list proto definitions: %w", err)
+		}
+		if len(protoDefs) == 0 {
+			return "", fmt.Errorf("no proto definitions found for profile %s", profileID)
+		}
+
+		// Build a map of file path to content for the parser accessor
+		fileContentMap := make(map[string]string)
+		var entryFiles []string
+		for _, def := range protoDefs {
+			rel := def.FilePath
+			fileContentMap[rel] = def.Content
+			entryFiles = append(entryFiles, rel)
+		}
+
+		// Add well-known types from the DB
+		wellKnownTypes, err := a.profileManager.GetStore().ListWellKnownTypes(ctx)
+		if err == nil {
+			for _, wkt := range wellKnownTypes {
+				fileContentMap[wkt.FilePath] = wkt.Content
+			}
+		}
+
+		// Build a unique, cycle-free list of proto files to parse for the service/method
+		visited := make(map[string]bool)
+		var orderedFiles []string
+		var dfs func(string, []string)
+		dfs = func(file string, stack []string) {
+			if visited[file] {
+				return
+			}
+			for _, ancestor := range stack {
+				if ancestor == file {
+					fmt.Printf("[WARN] Skipping cyclic import: %s (import stack: %v)\n", file, stack)
+					return
+				}
+			}
+			visited[file] = true
+			orderedFiles = append(orderedFiles, file)
+			content, ok := fileContentMap[file]
+			if !ok {
+				fmt.Printf("[WARN] Proto file not found in DB: %s\n", file)
+				return
+			}
+			for _, line := range strings.Split(content, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "import ") {
+					// Extract import path
+					parts := strings.Split(trimmed, "\"")
+					if len(parts) >= 2 {
+						importPath := parts[1]
+						if _, ok := fileContentMap[importPath]; ok {
+							dfs(importPath, append(stack, file))
+						}
+					}
+				}
+			}
+		}
+		// Start DFS from all entry files
+		for _, entry := range entryFiles {
+			dfs(entry, nil)
+		}
+		// Remove duplicates while preserving order
+		uniqueFiles := make([]string, 0, len(orderedFiles))
+		seen := make(map[string]struct{})
+		for _, f := range orderedFiles {
+			if _, ok := seen[f]; !ok {
+				uniqueFiles = append(uniqueFiles, f)
+				seen[f] = struct{}{}
+			}
+		}
+		entryFiles = uniqueFiles
+
+		parser := protoparse.Parser{
+			Accessor: func(filename string) (io.ReadCloser, error) {
+				if content, ok := fileContentMap[filename]; ok {
+					return io.NopCloser(strings.NewReader(content)), nil
+				}
+				return nil, fmt.Errorf("proto file not found: %s", filename)
+			},
+		}
+
+		fds, err := parser.ParseFiles(entryFiles...)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse proto files: %w", err)
+		}
+
+		// Find the service and method descriptors
+		var svcDesc *desc.ServiceDescriptor
+		var mDesc *desc.MethodDescriptor
+		for _, fd := range fds {
+			for _, svc := range fd.GetServices() {
+				if svc.GetFullyQualifiedName() == serviceName {
+					svcDesc = svc
+					break
+				}
+			}
+		}
+		if svcDesc == nil {
+			return "", fmt.Errorf("service not found in parsed protos: %s", serviceName)
+		}
+		for _, m := range svcDesc.GetMethods() {
+			if m.GetName() == methodName {
+				mDesc = m
+				break
+			}
+		}
+		if mDesc == nil {
+			return "", fmt.Errorf("method not found in parsed protos: %s", methodName)
+		}
+
+		// Set up headers
+		md := metadata.New(nil)
+		if headersJSON != "" {
+			var headers map[string]string
+			if err := json.Unmarshal([]byte(headersJSON), &headers); err == nil {
+				for k, v := range headers {
+					md.Append(k, v)
+				}
+			}
+		}
+		ctx = metadata.NewOutgoingContext(ctx, md)
+
+		// Print the outgoing gRPC call details for debugging
+		fmt.Printf("[DEBUG] Intended gRPC method: /%s/%s\n", serviceName, methodName)
+		fmt.Printf("[DEBUG] Request JSON: %s\n", requestJSON)
+		fmt.Printf("[DEBUG] Headers: %v\n", md)
+
+		// Build and send the dynamic message
+		conn, err := a.profileManager.GetConnection(profileID)
+		if err != nil {
+			return "", fmt.Errorf("no active connection for profile %s: %w", profileID, err)
+		}
+
+		if mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
+			// Client streaming (single response)
+			var arr []json.RawMessage
+			if err := json.Unmarshal([]byte(requestJSON), &arr); err != nil {
+				return "", fmt.Errorf("expected JSON array for client streaming: %w", err)
+			}
+			inputType := mDesc.GetInputType()
+			streamDesc := &grpc.StreamDesc{
+				ClientStreams: true,
+				ServerStreams: false,
+			}
+			methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+			stream, err := conn.NewStream(ctx, streamDesc, methodFullName)
+			if err != nil {
+				return "", fmt.Errorf("failed to open client stream: %w", err)
+			}
+			s := grpc.ClientStream(stream)
+			for _, msgBytes := range arr {
+				msg := dynamic.NewMessage(inputType)
+				if err := msg.UnmarshalJSON(msgBytes); err != nil {
+					return "", fmt.Errorf("failed to unmarshal stream message: %w", err)
+				}
+				if err := s.SendMsg(msg); err != nil {
+					return "", fmt.Errorf("failed to send stream message: %w", err)
+				}
+			}
+			if err := s.CloseSend(); err != nil {
+				return "", fmt.Errorf("failed to close stream: %w", err)
+			}
+			outType := mDesc.GetOutputType()
+			respMsg := dynamic.NewMessage(outType)
+			if err := s.RecvMsg(respMsg); err != nil {
+				return "", fmt.Errorf("failed to receive response: %w", err)
+			}
+			respJSON, err := respMsg.MarshalJSON()
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal response: %w", err)
+			}
+			return string(respJSON), nil
+		} else if !mDesc.IsClientStreaming() && mDesc.IsServerStreaming() {
+			// Server streaming (single request, multiple responses)
+			inputType := mDesc.GetInputType()
+			reqMsg := dynamic.NewMessage(inputType)
+			if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
+				return "", fmt.Errorf("failed to unmarshal request: %w", err)
+			}
+			streamDesc := &grpc.StreamDesc{
+				ClientStreams: false,
+				ServerStreams: true,
+			}
+			methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+			stream, err := conn.NewStream(ctx, streamDesc, methodFullName)
+			if err != nil {
+				return "", fmt.Errorf("failed to open server stream: %w", err)
+			}
+			s := grpc.ClientStream(stream)
+			if err := s.SendMsg(reqMsg); err != nil {
+				return "", fmt.Errorf("failed to send request: %w", err)
+			}
+			if err := s.CloseSend(); err != nil {
+				return "", fmt.Errorf("failed to close send: %w", err)
+			}
+			outType := mDesc.GetOutputType()
+			var responses []json.RawMessage
+			for {
+				respMsg := dynamic.NewMessage(outType)
+				err := s.RecvMsg(respMsg)
+				if err != nil {
+					if err.Error() == "EOF" {
+						break
+					}
+					return "", fmt.Errorf("failed to receive response: %w", err)
+				}
+				respJSON, err := respMsg.MarshalJSON()
+				if err != nil {
+					return "", fmt.Errorf("failed to marshal response: %w", err)
+				}
+				responses = append(responses, respJSON)
+			}
+			finalJSON, err := json.Marshal(responses)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal responses array: %w", err)
+			}
+			return string(finalJSON), nil
+		} else if mDesc.IsClientStreaming() && mDesc.IsServerStreaming() {
+			// Bidirectional streaming (multiple requests, multiple responses)
+			var arr []json.RawMessage
+			if err := json.Unmarshal([]byte(requestJSON), &arr); err != nil {
+				return "", fmt.Errorf("expected JSON array for bidi streaming: %w", err)
+			}
+			inputType := mDesc.GetInputType()
+			streamDesc := &grpc.StreamDesc{
+				ClientStreams: true,
+				ServerStreams: true,
+			}
+			methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+			stream, err := conn.NewStream(ctx, streamDesc, methodFullName)
+			if err != nil {
+				return "", fmt.Errorf("failed to open bidi stream: %w", err)
+			}
+			s := grpc.ClientStream(stream)
+			// Send all requests
+			for _, msgBytes := range arr {
+				msg := dynamic.NewMessage(inputType)
+				if err := msg.UnmarshalJSON(msgBytes); err != nil {
+					return "", fmt.Errorf("failed to unmarshal stream message: %w", err)
+				}
+				if err := s.SendMsg(msg); err != nil {
+					return "", fmt.Errorf("failed to send stream message: %w", err)
+				}
+			}
+			if err := s.CloseSend(); err != nil {
+				return "", fmt.Errorf("failed to close stream: %w", err)
+			}
+			outType := mDesc.GetOutputType()
+			var responses []json.RawMessage
+			for {
+				respMsg := dynamic.NewMessage(outType)
+				err := s.RecvMsg(respMsg)
+				if err != nil {
+					if err.Error() == "EOF" {
+						break
+					}
+					return "", fmt.Errorf("failed to receive response: %w", err)
+				}
+				respJSON, err := respMsg.MarshalJSON()
+				if err != nil {
+					return "", fmt.Errorf("failed to marshal response: %w", err)
+				}
+				responses = append(responses, respJSON)
+			}
+			finalJSON, err := json.Marshal(responses)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal responses array: %w", err)
+			}
+			return string(finalJSON), nil
+		} else {
+			// Unary
+			inputType := mDesc.GetInputType()
+			reqMsg := dynamic.NewMessage(inputType)
+			if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
+				return "", fmt.Errorf("failed to unmarshal request: %w", err)
+			}
+			outType := mDesc.GetOutputType()
+			respMsg := dynamic.NewMessage(outType)
+			methodFullName := fmt.Sprintf("/%s/%s", serviceName, methodName)
+			err = conn.Invoke(ctx, methodFullName, reqMsg, respMsg)
+			if err != nil {
+				return "", fmt.Errorf("gRPC call failed: %w", err)
+			}
+			respJSON, err := respMsg.MarshalJSON()
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal response: %w", err)
+			}
+			return string(respJSON), nil
+		}
+	}
+
+	// --- REFLECTION LOGIC (existing) ---
 	// 1. Get connection
 	conn, err := a.profileManager.GetConnection(profileID)
 	if err != nil {
@@ -402,12 +748,47 @@ func (a *App) CallGRPCMethod(
 	rc := grpcreflect.NewClient(ctx, reflectpb.NewServerReflectionClient(conn))
 	defer rc.Reset()
 
+	// Try to load well-known types directly
+	wellKnownTypes := []string{
+		"google.protobuf.Timestamp",
+		"google.protobuf.Empty",
+		"google.protobuf.Any",
+		"google.protobuf.Struct",
+		"google.protobuf.DoubleValue",
+		"google.protobuf.Duration",
+	}
+
+	for _, typeName := range wellKnownTypes {
+		fileDesc, err := rc.FileContainingSymbol(typeName)
+		if err != nil {
+			fmt.Printf("[WARN] Failed to load well-known type %s: %v\n", typeName, err)
+		} else {
+			fmt.Printf("[DEBUG] Loaded well-known type %s from file: %s\n", typeName, fileDesc.GetName())
+		}
+	}
+
+	// Get service descriptor
 	svcDesc, err := rc.ResolveService(serviceName)
 	if err != nil {
+		// Log available services for debugging
+		services, listErr := rc.ListServices()
+		if listErr != nil {
+			fmt.Printf("[DEBUG] Failed to list available services: %v\n", listErr)
+		} else {
+			fmt.Printf("[DEBUG] Available services: %v\n", services)
+		}
 		return "", fmt.Errorf("service not found: %w", err)
 	}
+
+	// Get method descriptor
 	mDesc := svcDesc.FindMethodByName(methodName)
 	if mDesc == nil {
+		// Log available methods for debugging
+		methodNames := make([]string, 0)
+		for _, m := range svcDesc.GetMethods() {
+			methodNames = append(methodNames, m.GetName())
+		}
+		fmt.Printf("[DEBUG] Available methods for service %s: %v\n", serviceName, methodNames)
 		return "", fmt.Errorf("method not found: %s", methodName)
 	}
 
@@ -423,7 +804,17 @@ func (a *App) CallGRPCMethod(
 	}
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
+	// Print the outgoing gRPC call details for debugging (before reflection)
+	fmt.Printf("[DEBUG] Intended gRPC method: /%s/%s\n", serviceName, methodName)
+	fmt.Printf("[DEBUG] Request JSON: %s\n", requestJSON)
+	fmt.Printf("[DEBUG] Headers: %v\n", md)
+
 	// 4. Handle method type
+	// Print the outgoing gRPC call details for debugging
+	fmt.Printf("[DEBUG] Invoking gRPC method: %s\n", fmt.Sprintf("/%s/%s", svcDesc.GetFullyQualifiedName(), methodName))
+	fmt.Printf("[DEBUG] Request JSON: %s\n", requestJSON)
+	fmt.Printf("[DEBUG] Headers: %v\n", md)
+
 	if mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
 		// Client streaming (single response)
 		var arr []json.RawMessage
@@ -560,7 +951,7 @@ func (a *App) CallGRPCMethod(
 			return "", fmt.Errorf("failed to marshal responses array: %w", err)
 		}
 		return string(finalJSON), nil
-	} else if !mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
+	} else {
 		// Unary
 		inputType := mDesc.GetInputType()
 		reqMsg := dynamic.NewMessage(inputType)
@@ -580,7 +971,33 @@ func (a *App) CallGRPCMethod(
 			return "", fmt.Errorf("failed to marshal response: %w", err)
 		}
 		return string(respJSON), nil
-	} else {
-		return "", fmt.Errorf("unknown gRPC method type")
 	}
+}
+
+// RegisterWellKnownTypesFromDB loads all well-known types from the store and registers them with the protobuf global registry.
+func RegisterWellKnownTypesFromDB(ctx context.Context, store services.ServerProfileStore) error {
+	wkts, err := store.ListWellKnownTypes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, wkt := range wkts {
+		fd := &descriptorpb.FileDescriptorProto{}
+		// Try to parse as proto text first
+		if err := prototext.Unmarshal([]byte(wkt.Content), fd); err != nil {
+			// fallback: try binary unmarshal
+			if err := goproto.Unmarshal([]byte(wkt.Content), fd); err != nil {
+				fmt.Printf("[WARN] Failed to parse well-known type %s: %v\n", wkt.TypeName, err)
+				continue
+			}
+		}
+		fileDesc, err := protodesc.NewFile(fd, protoregistry.GlobalFiles)
+		if err != nil {
+			fmt.Printf("[WARN] Failed to create file descriptor for %s: %v\n", wkt.TypeName, err)
+			continue
+		}
+		if err := protoregistry.GlobalFiles.RegisterFile(fileDesc); err != nil && !strings.Contains(err.Error(), "already registered") {
+			fmt.Printf("[WARN] Failed to register file descriptor for %s: %v\n", wkt.TypeName, err)
+		}
+	}
+	return nil
 }

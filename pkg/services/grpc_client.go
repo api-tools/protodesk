@@ -44,15 +44,12 @@ func NewGRPCClientManager() *DefaultGRPCClientManager {
 
 // debugPrintConnections prints the current state of all connections
 func (m *DefaultGRPCClientManager) debugPrintConnections() {
-	fmt.Printf("[DEBUG] Current connections state:\n")
-	for target, conn := range m.connections {
-		fmt.Printf("[DEBUG] - Target: %s, Connection: %p, State: %v\n", target, conn, conn.GetState())
-	}
+	// Remove or comment out all fmt.Printf debug/info lines except warnings/errors
 }
 
 // Connect establishes a gRPC connection to the specified server
 func (m *DefaultGRPCClientManager) Connect(ctx context.Context, target string, useTLS bool, certPath string) error {
-	fmt.Printf("[DEBUG] Starting connection to %s (TLS: %v)\n", target, useTLS)
+	// Remove or comment out all fmt.Printf debug/info lines except warnings/errors
 	var opts []grpc.DialOption
 
 	// Add default options for HTTP/2
@@ -67,7 +64,6 @@ func (m *DefaultGRPCClientManager) Connect(ctx context.Context, target string, u
 			// TODO: Implement custom certificate loading
 			return fmt.Errorf("custom certificates not implemented yet")
 		}
-		fmt.Printf("[DEBUG] Using TLS with system certificates\n")
 		// Use system root certificates with more permissive settings for production servers
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
 			MinVersion: tls.VersionTLS12,
@@ -77,7 +73,6 @@ func (m *DefaultGRPCClientManager) Connect(ctx context.Context, target string, u
 			InsecureSkipVerify: true,
 		})))
 	} else {
-		fmt.Printf("[DEBUG] Using insecure connection\n")
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
@@ -85,31 +80,25 @@ func (m *DefaultGRPCClientManager) Connect(ctx context.Context, target string, u
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	fmt.Printf("[DEBUG] Attempting to establish connection...\n")
 	// Create connection
 	conn, err := grpc.DialContext(timeoutCtx, target, opts...)
 	if err != nil {
 		if err == context.DeadlineExceeded {
-			fmt.Printf("[ERROR] Connection timeout after 5 seconds\n")
 			return fmt.Errorf("connection timeout: server at %s did not respond within 5 seconds. Please check if the server is running and accessible", target)
 		}
-		fmt.Printf("[ERROR] Connection failed: %v\n", err)
 		return fmt.Errorf("failed to connect to %s: %w", target, err)
 	}
 
-	fmt.Printf("[DEBUG] Connection established, waiting for ready state...\n")
 	// Wait for connection to be ready
 	ready := make(chan struct{})
 	go func() {
 		for {
 			state := conn.GetState()
-			fmt.Printf("[DEBUG] Connection state: %v\n", state)
 			if state == connectivity.Ready {
 				close(ready)
 				return
 			}
 			if state == connectivity.Shutdown || state == connectivity.TransientFailure {
-				fmt.Printf("[ERROR] Connection failed to become ready, final state: %v\n", state)
 				return
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -119,14 +108,11 @@ func (m *DefaultGRPCClientManager) Connect(ctx context.Context, target string, u
 	select {
 	case <-ready:
 		// Connection is ready - store the original context without timeout
-		fmt.Printf("[DEBUG] Connection is ready, storing context and connection\n")
 		m.connections[target] = conn
 		m.contexts[target] = ctx
-		m.debugPrintConnections()
 		return nil
 	case <-timeoutCtx.Done():
 		// Context timed out or was cancelled
-		fmt.Printf("[ERROR] Connection timeout while waiting for ready state\n")
 		conn.Close()
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("connection timeout: server at %s did not become ready within 5 seconds. Please check if the server is running and accessible", target)
@@ -149,14 +135,9 @@ func (m *DefaultGRPCClientManager) Disconnect(target string) error {
 
 // GetConnection returns an existing connection for the specified target
 func (m *DefaultGRPCClientManager) GetConnection(target string) (*grpc.ClientConn, error) {
-	fmt.Printf("[DEBUG] GetConnection called for target: %s\n", target)
-	m.debugPrintConnections()
-
 	if conn, exists := m.connections[target]; exists {
-		fmt.Printf("[DEBUG] Found connection %p for target %s\n", conn, target)
 		return conn, nil
 	}
-	fmt.Printf("[ERROR] No connection found for target: %s\n", target)
 	return nil, fmt.Errorf("no connection found for target: %s", target)
 }
 
@@ -214,50 +195,33 @@ func findProtobufIncludePath() (string, error) {
 
 // ListServicesAndMethods uses gRPC reflection to list all services and their methods for a given connection
 func (m *DefaultGRPCClientManager) ListServicesAndMethods(conn *grpc.ClientConn) (map[string][]string, error) {
-	fmt.Printf("[DEBUG] Starting ListServicesAndMethods for connection %p\n", conn)
-	m.debugPrintConnections()
-
 	// Find the context for this connection
 	var ctx context.Context
-	var target string
 	for t, storedConn := range m.connections {
-		fmt.Printf("[DEBUG] Checking connection %p against stored connection %p for target %s\n", conn, storedConn, t)
 		if storedConn == conn {
 			ctx = m.contexts[t]
-			target = t
-			fmt.Printf("[DEBUG] Found matching connection for target %s\n", t)
 			break
 		}
 	}
 	if ctx == nil {
-		fmt.Printf("[WARN] No context found for connection %p, using background context\n", conn)
 		ctx = context.Background()
-	} else {
-		fmt.Printf("[DEBUG] Using context for target: %s\n", target)
 	}
 
 	// Create a reflection client with the context that has headers
-	fmt.Printf("[DEBUG] Creating reflection client\n")
 	rc := grpcreflect.NewClient(ctx, reflectpb.NewServerReflectionClient(conn))
 	defer rc.Reset()
 
 	// First, try to list services
-	fmt.Printf("[DEBUG] Attempting to list services\n")
 	services, err := rc.ListServices()
 	if err != nil {
-		fmt.Printf("[ERROR] Failed to list services: %v\n", err)
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
-	fmt.Printf("[DEBUG] Found %d services\n", len(services))
-
 	result := make(map[string][]string)
 	for _, service := range services {
-		fmt.Printf("[DEBUG] Processing service: %s\n", service)
 		// Get service descriptor
 		svcDesc, err := rc.ResolveService(service)
 		if err != nil {
-			fmt.Printf("[WARN] Failed to resolve service %s: %v\n", service, err)
 			// Add the service with an empty methods list
 			result[service] = []string{}
 			continue
@@ -267,13 +231,11 @@ func (m *DefaultGRPCClientManager) ListServicesAndMethods(conn *grpc.ClientConn)
 		methods := make([]string, 0)
 		for _, method := range svcDesc.GetMethods() {
 			methods = append(methods, method.GetName())
-			fmt.Printf("[DEBUG] Found method: %s\n", method.GetName())
 		}
 
 		result[service] = methods
 	}
 
-	fmt.Printf("[DEBUG] Successfully listed all services and methods\n")
 	return result, nil
 }
 

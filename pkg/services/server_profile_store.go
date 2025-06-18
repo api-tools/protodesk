@@ -43,6 +43,13 @@ type ServerProfileStore interface {
 	UpsertPerRequestHeaders(ctx context.Context, h *models.PerRequestHeaders) error
 	GetPerRequestHeaders(ctx context.Context, serverProfileID, serviceName, methodName string) (*models.PerRequestHeaders, error)
 	DeletePerRequestHeaders(ctx context.Context, serverProfileID, serviceName, methodName string) error
+
+	// Well-known types CRUD methods
+	CreateWellKnownType(ctx context.Context, wkt *proto.WellKnownType) error
+	GetWellKnownType(ctx context.Context, typeName string) (*proto.WellKnownType, error)
+	ListWellKnownTypes(ctx context.Context) ([]*proto.WellKnownType, error)
+	UpdateWellKnownType(ctx context.Context, wkt *proto.WellKnownType) error
+	DeleteWellKnownType(ctx context.Context, typeName string) error
 }
 
 // ProtoPath represents a proto folder path linked to a server
@@ -142,6 +149,17 @@ func initializeSchema(db *sqlx.DB) error {
 		FOREIGN KEY(server_profile_id) REFERENCES server_profiles(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_per_request_headers_profile ON per_request_headers(server_profile_id);
+
+	CREATE TABLE IF NOT EXISTS well_known_types (
+		id TEXT PRIMARY KEY,
+		type_name TEXT NOT NULL UNIQUE,
+		file_path TEXT NOT NULL,
+		include_path TEXT,
+		content TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_well_known_types_type_name ON well_known_types(type_name);
 	`
 	_, err := db.Exec(schema)
 	return err
@@ -646,8 +664,6 @@ func (s *SQLiteStore) DeleteProtoDefinition(ctx context.Context, id string) erro
 }
 
 func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profileID string) ([]*proto.ProtoDefinition, error) {
-	fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Starting for profile: %s\n", profileID)
-
 	var rows []struct {
 		ID              string         `db:"id"`
 		FilePath        string         `db:"file_path"`
@@ -722,7 +738,6 @@ func (s *SQLiteStore) ListProtoDefinitionsByProfile(ctx context.Context, profile
 			FileOptions:     fileOptions,
 		})
 	}
-	fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Found %d definitions\n", len(defs))
 	return defs, nil
 }
 
@@ -874,6 +889,9 @@ func (s *SQLiteStore) ListProtoPathsByServer(ctx context.Context, serverID strin
 }
 
 func (s *SQLiteStore) DeleteProtoPath(ctx context.Context, id string) error {
+	// Explicitly delete proto_definitions for this proto_path_id (in case of legacy or NULL issues)
+	_, _ = s.db.ExecContext(ctx, "DELETE FROM proto_definitions WHERE proto_path_id = ?", id)
+	// Now delete the proto path itself
 	query := `DELETE FROM proto_paths WHERE id = ?`
 	_, err := s.db.ExecContext(ctx, query, id)
 	return err
@@ -913,5 +931,69 @@ func (s *SQLiteStore) DeletePerRequestHeaders(ctx context.Context, serverProfile
 	WHERE server_profile_id = ? AND service_name = ? AND method_name = ?
 	`
 	_, err := s.db.ExecContext(ctx, query, serverProfileID, serviceName, methodName)
+	return err
+}
+
+// Well-known types CRUD methods
+func (s *SQLiteStore) CreateWellKnownType(ctx context.Context, wkt *proto.WellKnownType) error {
+	query := `
+		INSERT INTO well_known_types (
+			id, type_name, file_path, include_path, content, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+	_, err := s.db.ExecContext(ctx, query,
+		wkt.ID,
+		wkt.TypeName,
+		wkt.FilePath,
+		wkt.IncludePath,
+		wkt.Content,
+		wkt.CreatedAt,
+		wkt.UpdatedAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetWellKnownType(ctx context.Context, typeName string) (*proto.WellKnownType, error) {
+	var wkt proto.WellKnownType
+	query := `SELECT * FROM well_known_types WHERE type_name = ?`
+	err := s.db.GetContext(ctx, &wkt, query, typeName)
+	if err != nil {
+		return nil, err
+	}
+	return &wkt, nil
+}
+
+func (s *SQLiteStore) ListWellKnownTypes(ctx context.Context) ([]*proto.WellKnownType, error) {
+	var wkts []*proto.WellKnownType
+	query := `SELECT * FROM well_known_types ORDER BY type_name`
+	err := s.db.SelectContext(ctx, &wkts, query)
+	if err != nil {
+		return nil, err
+	}
+	return wkts, nil
+}
+
+func (s *SQLiteStore) UpdateWellKnownType(ctx context.Context, wkt *proto.WellKnownType) error {
+	query := `
+		UPDATE well_known_types SET
+			file_path = ?,
+			include_path = ?,
+			content = ?,
+			updated_at = ?
+		WHERE type_name = ?
+	`
+	_, err := s.db.ExecContext(ctx, query,
+		wkt.FilePath,
+		wkt.IncludePath,
+		wkt.Content,
+		wkt.UpdatedAt,
+		wkt.TypeName,
+	)
+	return err
+}
+
+func (s *SQLiteStore) DeleteWellKnownType(ctx context.Context, typeName string) error {
+	query := `DELETE FROM well_known_types WHERE type_name = ?`
+	_, err := s.db.ExecContext(ctx, query, typeName)
 	return err
 }

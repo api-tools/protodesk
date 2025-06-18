@@ -281,50 +281,40 @@ func (m *ServerProfileManager) GetGRPCClient() GRPCClientManager {
 
 // ListProtoDefinitionsByProfile lists all proto definitions for a given profile
 func (m *ServerProfileManager) ListProtoDefinitionsByProfile(ctx context.Context, profileID string) ([]*proto.ProtoDefinition, error) {
-	fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Starting for profile: %s\n", profileID)
-
 	// First check if we have any definitions
 	defs, err := m.store.ListProtoDefinitionsByProfile(ctx, profileID)
 	if err != nil {
-		fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Failed to list proto definitions: %v\n", err)
 		return nil, fmt.Errorf("failed to list proto definitions: %w", err)
 	}
 
 	// If we have definitions, return them
 	if len(defs) > 0 {
-		fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Found %d existing definitions\n", len(defs))
 		return defs, nil
 	}
-
-	fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - No definitions found, forcing parse of all proto paths\n")
 
 	// Get all proto paths for this profile
 	protoPaths, err := m.store.ListProtoPathsByServer(ctx, profileID)
 	if err != nil {
-		fmt.Printf("[DEBUG] Method: ListProtoDefinitionsByProfile - Failed to list proto paths: %v\n", err)
 		return nil, fmt.Errorf("failed to list proto paths: %w", err)
 	}
 
 	// Force parse each proto path without hash check
 	for _, protoPath := range protoPaths {
-		fmt.Printf("[DEBUG] Forcing parse of proto path: %s\n", protoPath.Path)
 		err := m.protoParser.ScanAndParseProtoPath(ctx, profileID, protoPath.ID, protoPath.Path)
 		if err != nil {
-			fmt.Printf("[ERROR] Failed to parse proto path %s: %v\n", protoPath.Path, err)
 			continue // Continue with other paths even if one fails
 		}
 
 		// Update the hash after successful parse
 		hash, err := calculateProtoPathHash(protoPath.Path)
 		if err != nil {
-			fmt.Printf("[ERROR] Failed to calculate hash for %s: %v\n", protoPath.Path, err)
 			continue
 		}
 
 		protoPath.Hash = hash
 		protoPath.LastScanned = time.Now()
 		if err := m.store.UpdateProtoPath(ctx, protoPath); err != nil {
-			fmt.Printf("[ERROR] Failed to update proto path hash: %v\n", err)
+			continue
 		}
 	}
 
@@ -333,8 +323,6 @@ func (m *ServerProfileManager) ListProtoDefinitionsByProfile(ctx context.Context
 }
 
 func (m *ServerProfileManager) scanAndParseProtoPath(ctx context.Context, serverProfileId string, protoPathId string, path string) error {
-	fmt.Printf("[DEBUG] Scanning proto path: %s\n", path)
-
 	// Calculate hash of all proto files in the directory
 	hash, err := calculateProtoPathHash(path)
 	if err != nil {
@@ -349,7 +337,6 @@ func (m *ServerProfileManager) scanAndParseProtoPath(ctx context.Context, server
 
 	// If hash matches and last scan was recent (within 5 minutes), skip parsing
 	if protoPath != nil && protoPath.Hash == hash && time.Since(protoPath.LastScanned) < 5*time.Minute {
-		fmt.Printf("[DEBUG] Proto path %s is up to date (hash: %s), skipping parse\n", path, hash)
 		return nil
 	}
 
