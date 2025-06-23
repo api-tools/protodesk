@@ -89,6 +89,42 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 		}
 	}
 
+	// Build a map from import path (as written in proto files) to absolute file path
+	importPathToAbs := make(map[string]string)
+	for _, f := range protoFiles {
+		abs, err := filepath.Abs(f)
+		if err != nil {
+			continue
+		}
+		// Try to get the import path relative to the root proto dir
+		rel, err := filepath.Rel(rootProtoDir, abs)
+		if err != nil {
+			rel = filepath.Base(abs) // fallback to just the filename
+		}
+		importPathToAbs[rel] = abs
+		importPathToAbs[filepath.ToSlash(rel)] = abs // ensure forward slashes for proto imports
+		importPathToAbs[filepath.Base(abs)] = abs    // fallback for just the filename
+	}
+
+	fmt.Printf("[DEBUG] Import path to abs map:\n")
+	for k, v := range importPathToAbs {
+		fmt.Printf("  %s -> %s\n", k, v)
+	}
+
+	// Build a set of all found proto files (absolute paths)
+	foundFiles := make(map[string]struct{})
+	for _, f := range protoFiles {
+		abs, err := filepath.Abs(f)
+		if err == nil {
+			foundFiles[abs] = struct{}{}
+		}
+	}
+
+	fmt.Printf("[DEBUG] Found proto files (absolute):\n")
+	for abs := range foundFiles {
+		fmt.Printf("  %s\n", abs)
+	}
+
 	successfullyParsed := 0
 	// Parse each proto file
 	for _, file := range protoFiles {
@@ -138,9 +174,14 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 
 		// Process each file descriptor
 		for _, fileDesc := range descriptorSet.File {
-			// Read the original proto file content
-			content, err := os.ReadFile(file)
+			realPath, ok := importPathToAbs[fileDesc.GetName()]
+			if !ok {
+				fmt.Printf("[DEBUG] Skipping proto definition for %s (not found in import map)\n", fileDesc.GetName())
+				continue
+			}
+			content, err := os.ReadFile(realPath)
 			if err != nil {
+				fmt.Printf("[DEBUG] Failed to read proto file %s: %v\n", realPath, err)
 				continue
 			}
 
@@ -150,16 +191,11 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				// If it's a google/protobuf file, use the original file path
 				filePath = file
 			}
-			// Normalize filePath to absolute path
-			absFilePath, err := filepath.Abs(filePath)
-			if err != nil {
-				absFilePath = filePath
-			}
 
 			// Create proto definition
 			def := &proto.ProtoDefinition{
 				ID:              uuid.New().String(),
-				FilePath:        absFilePath,
+				FilePath:        realPath,
 				Content:         string(content),
 				Imports:         fileDesc.GetDependency(),
 				Services:        make([]proto.Service, 0),
@@ -429,13 +465,14 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 			// Check if proto definition already exists
 			existingDefs, err := p.store.ListProtoDefinitionsByProfile(ctx, serverProfileId)
 			if err != nil {
+				fmt.Printf("[DEBUG] Failed to list proto definitions for profile %s: %v\n", serverProfileId, err)
 				continue
 			}
 
 			var existingDef *proto.ProtoDefinition
 			for _, d := range existingDefs {
 				normalizedExistingPath, _ := filepath.Abs(d.FilePath)
-				normalizedNewPath, _ := filepath.Abs(def.FilePath)
+				normalizedNewPath, _ := filepath.Abs(realPath)
 				if normalizedExistingPath == normalizedNewPath {
 					existingDef = d
 					break
@@ -449,10 +486,11 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				for _, d := range existingDefs {
 					if d.ID != existingDef.ID {
 						normalizedExistingPath, _ := filepath.Abs(d.FilePath)
-						normalizedNewPath, _ := filepath.Abs(def.FilePath)
+						normalizedNewPath, _ := filepath.Abs(realPath)
 						if normalizedExistingPath == normalizedNewPath {
 							err = p.store.DeleteProtoDefinition(ctx, d.ID)
 							if err != nil {
+								fmt.Printf("[DEBUG] Failed to delete duplicate proto definition %s: %v\n", d.ID, err)
 								continue
 							}
 						}
@@ -460,13 +498,17 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 				}
 				err = p.store.UpdateProtoDefinition(ctx, def)
 				if err != nil {
+					fmt.Printf("[DEBUG] Failed to update proto definition for %s: %v\n", realPath, err)
 					continue
 				}
+				fmt.Printf("[DEBUG] Updated proto definition: %s\n", realPath)
 			} else {
 				err = p.store.CreateProtoDefinition(ctx, def)
 				if err != nil {
+					fmt.Printf("[DEBUG] Failed to create proto definition for %s: %v\n", realPath, err)
 					continue
 				}
+				fmt.Printf("[DEBUG] Created proto definition: %s\n", realPath)
 			}
 			successfullyParsed++
 		}
