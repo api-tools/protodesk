@@ -273,6 +273,22 @@ async function selectMethod(serviceName: string, methodName: string) {
   requestBuilderLoading.value = false
 }
 
+// Utility to recursively omit null fields from an object
+function omitNullFields(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(omitNullFields);
+  } else if (obj && typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== null) {
+        result[key] = omitNullFields(value);
+      }
+    }
+    return result;
+  }
+  return obj;
+}
+
 // Modify handleSend to handle loading states
 async function handleSend() {
   sendLoading.value = true
@@ -292,9 +308,11 @@ async function handleSend() {
       ? reflectionInputFields.value
       : (allServices.value.find(svc => svc.name === selectedService.value)?.methods.find(m => m.name === selectedMethod.value)?.inputType.fields || []))
     const fixedRequestData = fixRequestDataForProto(requestData.value, fields)
+    // Omit null fields before sending
+    const cleanedRequestData = omitNullFields(fixedRequestData)
     let requestJSON = ''
     try {
-      requestJSON = JSON.stringify(fixedRequestData)
+      requestJSON = JSON.stringify(cleanedRequestData)
     } catch (e) {
       sendError.value = e instanceof Error ? 'Invalid request data: ' + e.message : 'Invalid request data: ' + String(e)
       return

@@ -433,6 +433,7 @@ func (a *App) CallGRPCMethod(
 	requestJSON string,
 	headersJSON string,
 ) (string, error) {
+	fmt.Printf("[DEBUG] CallGRPCMethod called with:\n  profileID: %s\n  serviceName: %s\n  methodName: %s\n  requestJSON: %s\n  headersJSON: %s\n", profileID, serviceName, methodName, requestJSON, headersJSON)
 	// 0. Get server profile
 	profile, err := a.profileManager.GetStore().Get(a.ctx, profileID)
 	if err != nil {
@@ -453,11 +454,24 @@ func (a *App) CallGRPCMethod(
 		// Build a map of file path to content for the parser accessor
 		fileContentMap := make(map[string]string)
 		var entryFiles []string
+		protoRoot := "/Users/l.chmielewski/Projects/proto/proto" // TODO: make this dynamic if needed
 		for _, def := range protoDefs {
-			rel := def.FilePath
+			rel, err := filepath.Rel(protoRoot, def.FilePath)
+			if err != nil {
+				rel = def.FilePath // fallback
+			}
+			rel = filepath.ToSlash(rel) // ensure forward slashes
 			fileContentMap[rel] = def.Content
 			entryFiles = append(entryFiles, rel)
 		}
+		fmt.Printf("[DEBUG] Entry files for proto parsing: %v\n", entryFiles)
+		fmt.Printf("[DEBUG] fileContentMap keys: %v\n", func() []string {
+			keys := make([]string, 0, len(fileContentMap))
+			for k := range fileContentMap {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
 
 		// Add well-known types from the DB
 		wellKnownTypes, err := a.profileManager.GetStore().ListWellKnownTypes(ctx)
@@ -554,6 +568,7 @@ func (a *App) CallGRPCMethod(
 		if mDesc == nil {
 			return "", fmt.Errorf("method not found in parsed protos: %s", methodName)
 		}
+		fmt.Printf("[DEBUG] Found method descriptor: %s\n", mDesc.GetName())
 
 		// Set up headers
 		md := metadata.New(nil)
@@ -578,13 +593,25 @@ func (a *App) CallGRPCMethod(
 			return "", fmt.Errorf("no active connection for profile %s: %w", profileID, err)
 		}
 
+		// Unary (add debug for request message)
+		inputType := mDesc.GetInputType()
+		reqMsg := dynamic.NewMessage(inputType)
+		if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
+			fmt.Printf("[DEBUG] Error building request message from JSON: %v\n", err)
+			return "", fmt.Errorf("failed to unmarshal request: %w", err)
+		}
+		if reqMsg == nil {
+			fmt.Printf("[DEBUG] Request message is nil after JSON conversion!\n")
+			return "", fmt.Errorf("request message is nil after JSON conversion")
+		}
+		fmt.Printf("[DEBUG] Built request message: %v\n", reqMsg)
+
 		if mDesc.IsClientStreaming() && !mDesc.IsServerStreaming() {
 			// Client streaming (single response)
 			var arr []json.RawMessage
 			if err := json.Unmarshal([]byte(requestJSON), &arr); err != nil {
 				return "", fmt.Errorf("expected JSON array for client streaming: %w", err)
 			}
-			inputType := mDesc.GetInputType()
 			streamDesc := &grpc.StreamDesc{
 				ClientStreams: true,
 				ServerStreams: false,
@@ -791,8 +818,22 @@ func (a *App) CallGRPCMethod(
 		fmt.Printf("[DEBUG] Available methods for service %s: %v\n", serviceName, methodNames)
 		return "", fmt.Errorf("method not found: %s", methodName)
 	}
+	fmt.Printf("[DEBUG] Found method descriptor: %s\n", mDesc.GetName())
 
-	// 3. Set up headers
+	// Build the request message from JSON
+	inputType := mDesc.GetInputType()
+	reqMsg := dynamic.NewMessage(inputType)
+	if err := reqMsg.UnmarshalJSON([]byte(requestJSON)); err != nil {
+		fmt.Printf("[DEBUG] Error building request message from JSON: %v\n", err)
+		return "", fmt.Errorf("failed to unmarshal request: %w", err)
+	}
+	if reqMsg == nil {
+		fmt.Printf("[DEBUG] Request message is nil after JSON conversion!\n")
+		return "", fmt.Errorf("request message is nil after JSON conversion")
+	}
+	fmt.Printf("[DEBUG] Built request message: %v\n", reqMsg)
+
+	// Set up headers
 	md := metadata.New(nil)
 	if headersJSON != "" {
 		var headers map[string]string

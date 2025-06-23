@@ -128,6 +128,7 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 	successfullyParsed := 0
 	// Parse each proto file
 	for _, file := range protoFiles {
+		fmt.Printf("[DEBUG] Parsing proto file: %s\n", file)
 		// Normalize file path to absolute path
 		// absFile, err := filepath.Abs(file)
 		// if err != nil {
@@ -151,12 +152,16 @@ func (p *ProtoParser) ScanAndParseProtoPath(ctx context.Context, serverProfileId
 		}
 		args = append(args, file)
 
+		fmt.Printf("[DEBUG] Running protoc command: protoc %s\n", strings.Join(args, " "))
+		fmt.Printf("[DEBUG] Import paths used: %v\n", importPaths)
+
 		// Run protoc command
 		cmd := exec.CommandContext(ctx, "protoc", args...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		err = cmd.Run()
 		if err != nil {
+			fmt.Printf("[DEBUG] protoc failed for %s: %v\n[DEBUG] protoc stderr: %s\n", file, err, stderr.String())
 			continue
 		}
 
