@@ -454,14 +454,24 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                     ? desk.cancel
                     : desk.connected &&
                           desk.method != null &&
-                          !desk.method!.clientStreaming
+                          !(desk.method!.clientStreaming &&
+                              desk.method!.serverStreaming)
                     ? desk.invoke
                     : null,
-                child: Text(desk.invoking ? 'Cancel' : 'Invoke'),
+                child: Text(
+                  desk.invoking
+                      ? 'Cancel'
+                      : desk.method?.clientStreaming == true
+                      ? 'Start'
+                      : 'Invoke',
+                ),
               ),
             ],
           ),
         ),
+        if (desk.method?.clientStreaming == true &&
+            desk.method?.serverStreaming == false)
+          requestStreamControls(),
         Expanded(
           child: desk.method == null
               ? const Center(
@@ -480,9 +490,10 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       ),
                     ),
                     const SizedBox(height: DeskSpace.panel),
-                    if (desk.method!.clientStreaming) ...[
+                    if (desk.method!.clientStreaming &&
+                        desk.method!.serverStreaming) ...[
                       const Text(
-                        'Client and bidirectional streaming are not supported.',
+                        'Bidirectional streaming is pending the next increment.',
                         style: DeskType.secondary,
                       ),
                       const SizedBox(height: DeskSpace.gap),
@@ -572,6 +583,127 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
       ],
     ),
   );
+  Widget requestStreamControls() => Container(
+    key: const ValueKey('request-stream-controls'),
+    padding: const EdgeInsets.symmetric(
+      horizontal: DeskSpace.inset,
+      vertical: DeskSpace.small,
+    ),
+    decoration: const BoxDecoration(
+      border: Border(bottom: BorderSide(color: Color(0xff303b47))),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                desk.invoking
+                    ? '${desk.sentRequests.length} sent · ${desk.sendingFinished ? 'send side closed' : 'send side open'}'
+                    : '${desk.queuedRequests.length} messages queued',
+                style: DeskType.secondary,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Review send queue',
+              onPressed: desk.invoking
+                  ? null
+                  : () => showDialog<void>(
+                      context: context,
+                      builder: (context) => AnimatedBuilder(
+                        animation: desk,
+                        builder: (context, _) => AlertDialog(
+                          title: const Text('Request send queue'),
+                          content: SizedBox(
+                            width: 540,
+                            height: 300,
+                            child: desk.queuedRequests.isEmpty
+                                ? const Center(
+                                    child: Text(
+                                      'No messages queued. Compose a message and choose Queue message.',
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    itemCount: desk.queuedRequests.length,
+                                    itemBuilder: (context, index) => Row(
+                                      children: [
+                                        Expanded(
+                                          child: Tooltip(
+                                            message: pretty.convert(
+                                              desk.queuedRequests[index],
+                                            ),
+                                            child: Text(
+                                              '${index + 1}. ${jsonEncode(desk.queuedRequests[index])}',
+                                              style: DeskType.code,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip:
+                                              'Load queued message ${index + 1}',
+                                          onPressed: desk.invoking
+                                              ? null
+                                              : () {
+                                                  desk.setBody(
+                                                    pretty.convert(
+                                                      desk.queuedRequests[index],
+                                                    ),
+                                                  );
+                                                  Navigator.pop(context);
+                                                },
+                                          icon: const Icon(Icons.edit_outlined),
+                                        ),
+                                        IconButton(
+                                          tooltip:
+                                              'Remove queued message ${index + 1}',
+                                          onPressed: desk.invoking
+                                              ? null
+                                              : () => desk.removeQueuedRequest(
+                                                  index,
+                                                ),
+                                          icon: const Icon(Icons.close),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Close'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+              icon: const Icon(Icons.playlist_play),
+            ),
+          ],
+        ),
+        Wrap(
+          spacing: DeskSpace.gap,
+          runSpacing: DeskSpace.small,
+          children: [
+            TextButton(
+              onPressed: desk.invoking
+                  ? (desk.canSend ? desk.sendDraft : null)
+                  : desk.queueDraft,
+              child: Text(desk.invoking ? 'Send message' : 'Queue message'),
+            ),
+            if (desk.invoking)
+              OutlinedButton(
+                onPressed: desk.canSend ? desk.finishSending : null,
+                child: const Text('Finish sending'),
+              ),
+          ],
+        ),
+      ],
+    ),
+  );
+
   List<Widget> formFields() {
     Object? parsed;
     try {

@@ -68,11 +68,88 @@ class DynamicClient extends Client {
     String path,
     List<int> request,
     CallOptions options,
+  ) => stream(path, Stream.value(request), options);
+  ResponseStream<List<int>> stream(
+    String path,
+    Stream<List<int>> requests,
+    CallOptions options,
   ) => $createStreamingCall(
     ClientMethod<List<int>, List<int>>(path, (v) => v, (v) => v),
-    Stream.value(request),
+    requests,
     options: options,
   );
+}
+
+/// Limits bound both the local queue and gRPC's transport-owned outgoing buffer.
+abstract final class RequestStreamLimits {
+  static const messages = 1000,
+      wireBytes = 64 * 1024 * 1024,
+      jsonBytes = 64 * 1024 * 1024;
+  static const queuedMessages = 64, queuedBytes = 32 * 1024 * 1024;
+}
+
+/// A live request stream: send snapshots, then explicitly half-close it.
+class RequestStreamCall {
+  final ProtoCodec codec;
+  final ProtoMethod method;
+  final _requests = StreamController<List<int>>();
+  late final Future<CallResult> result;
+  bool _inputClosed = false, _completed = false;
+  int _sentCount = 0,
+      _sentBytes = 0,
+      _jsonBytes = 0,
+      _queuedCount = 0,
+      _queuedBytes = 0;
+  bool get inputClosed => _inputClosed;
+  bool get completed => _completed;
+  int get sentCount => _sentCount;
+  int get queuedCount => _queuedCount;
+  int get queuedBytes => _queuedBytes;
+  RequestStreamCall._(this.codec, this.method);
+  Stream<List<int>> get requests => _requests.stream.map((bytes) {
+    _queuedCount--;
+    _queuedBytes -= bytes.length;
+    return bytes;
+  });
+  void send(Object? message) {
+    if (_inputClosed || _completed) {
+      throw StateError('Request send side is closed');
+    }
+    final bytes = codec.encode(method.input, message);
+    final size = utf8.encode(jsonEncode(message)).length;
+    if (_sentCount >= RequestStreamLimits.messages ||
+        _sentBytes + bytes.length > RequestStreamLimits.wireBytes ||
+        _jsonBytes + size > RequestStreamLimits.jsonBytes) {
+      throw const GrpcError.resourceExhausted(
+        'Request stream exceeds 1000 messages or 64 MiB',
+      );
+    }
+    if (_queuedCount >= RequestStreamLimits.queuedMessages ||
+        _queuedBytes + bytes.length > RequestStreamLimits.queuedBytes) {
+      throw const GrpcError.resourceExhausted(
+        'Send queue is full (64 messages / 32 MiB); wait before sending again',
+      );
+    }
+    _sentCount++;
+    _sentBytes += bytes.length;
+    _jsonBytes += size;
+    _queuedCount++;
+    _queuedBytes += bytes.length;
+    _requests.add(bytes);
+  }
+
+  void finishSending() {
+    if (_inputClosed) return;
+    _inputClosed = true;
+    // Closing queues the half-close after every previously accepted message.
+    // A channel that never subscribed must not block cancellation cleanup.
+    unawaited(_requests.close());
+  }
+
+  void _complete() {
+    _completed = true;
+    finishSending();
+  }
 }
 
 class GrpcEngine {
@@ -81,10 +158,14 @@ class GrpcEngine {
   ConnectionConfig? _config;
   SchemaRegistry schema = SchemaRegistry();
   final _calls = <ResponseStream<List<int>>>{};
+  final _outgoing = <RequestStreamCall>{};
   int _generation = 0;
   GrpcEngine(this.loader);
   Future<void> disconnect() async {
     _generation++;
+    for (final outgoing in _outgoing.toList()) {
+      outgoing._complete();
+    }
     for (final call in _calls.toList()) {
       await call.cancel();
     }
@@ -259,20 +340,46 @@ class GrpcEngine {
     void Function(Object? message)? onMessage,
   }) async {
     final clock = Stopwatch()..start();
-    final messages = <Object?>[];
-    final headers = <String, String>{};
-    final trailers = <String, String>{};
     if (method.clientStreaming) {
-      return CallResult(
-        [],
-        'UNIMPLEMENTED',
-        method.serverStreaming
-            ? 'Bidirectional streaming is unsupported'
-            : 'Client streaming is unsupported',
-        0,
-        {},
-        {},
-      );
+      if (method.serverStreaming) {
+        return const CallResult(
+          [],
+          'UNIMPLEMENTED',
+          'Bidirectional streaming is pending the next increment',
+          0,
+          {},
+          {},
+        );
+      }
+      try {
+        final stream = startClientStream(
+          method,
+          metadata: metadata,
+          timeoutMs: timeoutMs,
+          authority: authority,
+          onMessage: onMessage,
+        );
+        try {
+          stream.send(body);
+          stream.finishSending();
+        } catch (_) {
+          await cancel();
+          rethrow;
+        }
+        return await stream.result;
+      } catch (e) {
+        final grpc = e is GrpcError
+            ? e
+            : GrpcError.invalidArgument(e.toString());
+        return CallResult(
+          [],
+          _code(grpc.code),
+          grpc.message ?? '',
+          clock.elapsedMilliseconds,
+          {},
+          {},
+        );
+      }
     }
     if (_channel == null || _config == null) {
       return const CallResult(
@@ -298,11 +405,68 @@ class GrpcEngine {
         {},
       );
     }
+    return _invokeEncoded(
+      method,
+      Stream.value(bytes),
+      metadata: metadata,
+      timeoutMs: timeoutMs,
+      authority: authority,
+      onMessage: onMessage,
+    );
+  }
+
+  RequestStreamCall startClientStream(
+    ProtoMethod method, {
+    Map<String, String> metadata = const {},
+    int timeoutMs = 5000,
+    String authority = '',
+    void Function(Object? message)? onMessage,
+  }) {
+    if (!method.clientStreaming) {
+      throw const GrpcError.invalidArgument('Method has no streaming request');
+    }
+    if (method.serverStreaming) {
+      throw const GrpcError.unimplemented(
+        'Bidirectional streaming is pending the next increment',
+      );
+    }
+    if (_channel == null || _config == null) {
+      throw const GrpcError.failedPrecondition('No server connected');
+    }
+    final stream = RequestStreamCall._(ProtoCodec(schema), method);
+    _outgoing.add(stream);
+    stream.result =
+        _invokeEncoded(
+          method,
+          stream.requests,
+          metadata: metadata,
+          timeoutMs: timeoutMs,
+          authority: authority,
+          onMessage: onMessage,
+        ).whenComplete(() {
+          stream._complete();
+          _outgoing.remove(stream);
+        });
+    return stream;
+  }
+
+  Future<CallResult> _invokeEncoded(
+    ProtoMethod method,
+    Stream<List<int>> requests, {
+    required Map<String, String> metadata,
+    required int timeoutMs,
+    required String authority,
+    void Function(Object? message)? onMessage,
+  }) async {
+    final clock = Stopwatch()..start();
+    final codec = ProtoCodec(schema);
+    final messages = <Object?>[];
+    final headers = <String, String>{}, trailers = <String, String>{};
     final temporary = authority.isEmpty ? null : _create(_config!, authority);
     final channel = temporary ?? _channel!;
-    final call = DynamicClient(channel).call(
+    final call = DynamicClient(channel).stream(
       method.path,
-      bytes,
+      requests,
       CallOptions(
         timeout: Duration(milliseconds: timeoutMs > 0 ? timeoutMs : 5000),
         metadata: {..._config!.metadata, ...metadata},

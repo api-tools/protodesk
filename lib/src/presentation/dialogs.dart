@@ -20,14 +20,14 @@ Future<Record?> editRecord(
       ? ['name', 'address', 'metadataJson']
       : table == 'collections'
       ? ['name', 'description']
-      : ['name', 'requestJson', 'requestMetadataJson'];
+      : ['name', 'requestJson', 'requestStreamJson', 'requestMetadataJson'];
   final fields = {
     for (final key in keys)
       key: TextEditingController(
         text:
             record?[key]?.toString() ??
             (key.endsWith('Json')
-                ? '{}'
+                ? (key == 'requestStreamJson' ? '[]' : '{}')
                 : key == 'address'
                 ? 'localhost:50051'
                 : ''),
@@ -387,6 +387,7 @@ Future<void> saveExample(
         'methodName',
         'fullMethod',
         'requestJson',
+        'requestStreamJson',
         'requestMetadataJson',
       ])
         key: data[key],
@@ -631,6 +632,14 @@ Future<void> previewRequest(
                 const Text('REQUEST'),
                 Text(item['requestJson'] as String, style: DeskType.code),
                 const SizedBox(height: DeskSpace.panel),
+                if ((item['requestStreamJson'] as String? ?? '[]') != '[]') ...[
+                  const Text('REQUEST STREAM'),
+                  Text(
+                    item['requestStreamJson'] as String,
+                    style: DeskType.code,
+                  ),
+                  const SizedBox(height: DeskSpace.panel),
+                ],
                 const Text('METADATA'),
                 Text(
                   item['requestMetadataJson'] as String,
@@ -647,6 +656,13 @@ Future<void> previewRequest(
         ),
       ),
       actions: [
+        if ((item['requestStreamJson'] as String? ?? '[]') != '[]')
+          TextButton(
+            onPressed: () => Clipboard.setData(
+              ClipboardData(text: item['requestStreamJson'] as String),
+            ),
+            child: const Text('Copy request stream'),
+          ),
         TextButton(
           onPressed: () => Clipboard.setData(
             ClipboardData(

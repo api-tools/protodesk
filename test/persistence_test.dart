@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqlite3/sqlite3.dart';
 import 'package:protodesk/src/persistence/store.dart';
 
 void main() {
@@ -13,6 +14,44 @@ void main() {
   tearDown(() {
     store.close();
     directory.deleteSync(recursive: true);
+  });
+  test('stream column migration preserves legacy records and snapshots before altering schema', () {
+    final collection = store.save('collections', {'name': 'Legacy'});
+    final request = store.save('collection_requests', {
+      'name': 'Legacy request',
+      'collectionId': collection['id'],
+      'fullMethod': '/legacy/Upload',
+      'requestJson': '{"text":"preserved"}',
+    });
+    final history = store.save('history_items', {
+      'serverAddress': 'localhost:50051',
+      'fullMethod': '/legacy/Upload',
+      'statusCode': 'OK',
+      'requestJson': '{"text":"preserved"}',
+    });
+    for (final table in ['collection_requests', 'history_items']) {
+      store.db.execute('ALTER TABLE $table DROP COLUMN request_stream_json');
+    }
+    store.close();
+    store = WorkspaceStore.open('${directory.path}/protodesk.sqlite');
+    expect(store.list('collection_requests').single, request);
+    expect(store.list('history_items').single, history);
+    final backup = Directory('${directory.path}/backups').listSync().single;
+    final snapshot = sqlite3.open(backup.path);
+    try {
+      expect(
+        snapshot
+            .select('PRAGMA table_info(collection_requests)')
+            .any((r) => r['name'] == 'request_stream_json'),
+        false,
+      );
+      expect(
+        snapshot.select('SELECT id FROM collection_requests').single['id'],
+        request['id'],
+      );
+    } finally {
+      snapshot.close();
+    }
   });
   test('CRUD, restart, timestamps, history and collection relationships', () {
     final server = store.save('servers', {

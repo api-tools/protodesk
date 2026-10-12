@@ -31,6 +31,7 @@ class WorkspaceStore {
       'methodName',
       'fullMethod',
       'requestJson',
+      'requestStreamJson',
       'requestMetadataJson',
       'responseJson',
       'statusCode',
@@ -50,6 +51,7 @@ class WorkspaceStore {
       'methodName',
       'fullMethod',
       'requestJson',
+      'requestStreamJson',
       'requestMetadataJson',
       'createdAt',
       'updatedAt',
@@ -93,6 +95,17 @@ class WorkspaceStore {
           database.execute(
             'CREATE TABLE IF NOT EXISTS ${table.key} (workspace_id TEXT NOT NULL, id TEXT NOT NULL, ${declarations.join(', ')}, PRIMARY KEY(workspace_id,id)${table.key == 'collection_requests' ? ', FOREIGN KEY(workspace_id,collection_id) REFERENCES collections(workspace_id,id) ON DELETE CASCADE' : ''})',
           );
+          if (table.value.contains('requestStreamJson')) {
+            final existingColumns = database
+                .select('PRAGMA table_info(${table.key})')
+                .map((r) => r['name'])
+                .toSet();
+            if (!existingColumns.contains('request_stream_json')) {
+              database.execute(
+                "ALTER TABLE ${table.key} ADD COLUMN request_stream_json TEXT NOT NULL DEFAULT '[]'",
+              );
+            }
+          }
         }
       });
       return store;
@@ -184,13 +197,24 @@ class WorkspaceStore {
     for (final key in [
       'metadataJson',
       'requestJson',
+      'requestStreamJson',
       'requestMetadataJson',
       'responseJson',
     ]) {
       if (columns[table]!.contains(key)) {
         final value = record[key]?.toString().trim() ?? '';
-        record[key] = value.isEmpty ? '{}' : value;
-        jsonDecode(record[key] as String);
+        record[key] = value.isEmpty
+            ? (key == 'requestStreamJson' ? '[]' : '{}')
+            : value;
+        final decoded = jsonDecode(record[key] as String);
+        if (key == 'requestStreamJson' &&
+            (decoded is! List ||
+                decoded.length > 1000 ||
+                utf8.encode(record[key] as String).length > 64 * 1024 * 1024)) {
+          throw const FormatException(
+            'Streaming requests must be an array of at most 1000 messages / 64 MiB',
+          );
+        }
       }
     }
     if (table == 'history_items' &&
