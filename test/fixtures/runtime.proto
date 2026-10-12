@@ -1,0 +1,42 @@
+syntax = "proto3";
+package runtime.fixture;
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/field_mask.proto";
+enum Mode { option allow_alias = true; UNKNOWN = 0; ACTIVE = 1; RUNNING = 1; NEGATIVE = -1; }
+message Payload {
+ string text = 1;
+ int64 signed = 2;
+ uint64 unsigned = 3;
+ bytes bytes = 4;
+ Mode mode = 5;
+ repeated sint32 values = 6;
+ map<string, Payload> children = 7;
+ Payload nested = 8;
+ oneof choice { string first = 9; int32 second = 10; }
+ optional bool present = 11;
+ google.protobuf.Timestamp timestamp = 12;
+ google.protobuf.Duration duration = 13;
+ google.protobuf.Struct structured = 14;
+ google.protobuf.Int64Value wrapped = 15;
+ double number = 16;
+ fixed64 fixed = 17;
+ sfixed32 negative = 18;
+ google.protobuf.Any any = 19;
+ google.protobuf.FieldMask mask = 20;
+ bool flag = 21;
+ repeated Payload items = 22;
+ repeated Mode modes = 23;
+ float decimal = 24;
+ sint64 zigzag = 25;
+ map<bool,int32> switches = 26;
+}
+service Echo {
+ rpc Unary(Payload) returns (Payload);
+ rpc Watch(Payload) returns (stream Payload);
+ rpc Upload(stream Payload) returns (Payload);
+ rpc Chat(stream Payload) returns (stream Payload);
+}
