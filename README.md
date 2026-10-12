@@ -13,10 +13,10 @@ Choose a server → browse services and methods → edit a request → invoke �
 - Reflection-first API discovery with local `.proto` fallback. Native file/folder selection, standard imports, source validation, and persistent file access on macOS.
 - Runtime protobuf descriptors and JSON encoding: user APIs do not need generated application classes. Supports scalar types, 64-bit string integers, bytes, enums, maps, repeated/nested/recursive messages, oneofs, presence, and well-known JSON types.
 - Schema-aware Form/JSON editing, individual repeated-item controls, enum and boolean controls, timestamp date/time selection, and validation that retains invalid local drafts.
-- Unary calls and incremental server streams, with cancellation, headers/trailers, elapsed time, partial results on failure, and limits of 1,000 messages / 64 MiB of buffered wire data.
-- SQLite saved servers, collections of reusable requests, local invocation history, and version 1 JSON workspace import/export. Imports duplicate records and remap server IDs; exports omit history.
+- Unary, server-streaming, client-streaming and bidirectional RPCs. Compose Form/JSON messages, queue snapshots, start a request stream, send messages and explicitly finish sending. Bidirectional replies and headers arrive while the send side remains open. Cancellation, deadlines and errors retain partial responses. Incoming data is capped at 1,000 messages / 64 MiB; the send queue at 64 messages / 32 MiB, with 1,000 messages / 64 MiB wire and JSON per request stream.
+- SQLite saved servers, collections of reusable requests and streaming sequences, local invocation history, and version 1 JSON workspace import/export. Imports duplicate records and remap server IDs; exports omit history.
 
-Client and bidirectional streaming are explicitly unsupported. Proto2/proto3 schemas are supported; protobuf editions are currently rejected with an actionable error. Proto loading is bounded to 2,048 files, 32 MiB total, 4 MiB per file, and a 10-second compiler deadline. Absolute/parent imports and symlinks escaping configured roots are rejected. Requests/responses are bounded to 32 MiB and 64 nested message levels.
+Proto2/proto3 schemas are supported; protobuf editions are currently rejected with an actionable error. Proto loading is bounded to 2,048 files, 32 MiB total, 4 MiB per file, and a 10-second compiler deadline. Absolute/parent imports and symlinks escaping configured roots are rejected. Requests/responses are bounded to 32 MiB and 64 nested message levels.
 
 ## Downloads
 
@@ -51,8 +51,10 @@ dart format --output=none --set-exit-if-changed lib test tool
 flutter analyze
 flutter test
 flutter build macos --release   # or windows / linux
-sh tool/package_macos.sh        # macOS: verify signatures and create complete ZIP
+python3 tool/package_macos.py development  # explicit ad-hoc development ZIP
 ```
+
+Developer ID distribution is prepared separately and requires real local credentials and notarization evidence before publication; see [the signing setup guide](docs/MACOS_DISTRIBUTION.md). The current public macOS download description above remains unchanged until that verification succeeds.
 
 Tests use a new Dart fixture service and an API schema loaded at runtime. They cover wire interoperability with protoc, reflection variants, proto-only discovery, unary errors and deadlines, TLS trust, metadata, streaming completion/failure/cancellation/limits, request editors, SQLite persistence, and transactional workspace transfer. CI builds and exercises compiled releases separately on all three operating systems.
 

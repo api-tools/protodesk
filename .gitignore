@@ -55,3 +55,9 @@ app.*.map.json
 
 __pycache__/
 *.pyc
+
+# Private Apple distribution material stays outside version control.
+*.p12
+AuthKey_*.p8
+*.keychain-db
+.signing-local.env

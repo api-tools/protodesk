@@ -1,5 +1,6 @@
 """Credential-free regressions: ordering, fail-closed policy and PR isolation."""
 import json
+import base64
 import os
 from pathlib import Path
 import plistlib
@@ -107,6 +108,20 @@ class DistributionTests(unittest.TestCase):
             credentials.guard({'GITHUB_EVENT_NAME':'pull_request'})
         with self.assertRaisesRegex(RuntimeError, 'Missing protected'):
             credentials.guard({'GITHUB_EVENT_NAME':'push','GITHUB_REF':'refs/tags/v1.0.4','GITHUB_REPOSITORY':'api-tools/protodesk','RUNNER_OS':'macOS'})
+
+    def test_wrapped_certificate_secret_is_imported_privately_and_cleanup_restores_state(self):
+        with tempfile.TemporaryDirectory() as root:
+            encoded = base64.b64encode(b'test-only certificate bytes').decode()
+            environ = {'RUNNER_TEMP':root,'GITHUB_ENV':str(Path(root)/'job-env'),'GITHUB_EVENT_NAME':'push','GITHUB_REF':'refs/tags/v1.0.4','GITHUB_REPOSITORY':'api-tools/protodesk','RUNNER_OS':'macOS',
+                'APPLE_DEVELOPER_ID_P12_BASE64':encoded[:8]+'\n'+encoded[8:]+'\n','APPLE_DEVELOPER_ID_P12_PASSWORD':'test-only-export-password','APPLE_TEAM_ID':'ZGPYL87DRA','APPLE_NOTARY_APPLE_ID':'fixture@example.invalid','APPLE_NOTARY_APP_PASSWORD':'test-only-notary-password'}
+            with patch.object(credentials, 'sensitive', return_value='"/tmp/original.keychain-db"\n'), patch.object(credentials.subprocess, 'run', return_value=subprocess.CompletedProcess([],0)):
+                credentials.setup(environ)
+                self.assertFalse((Path(root)/'protodesk-signing.p12').exists())
+                exported = Path(environ['GITHUB_ENV']).read_text()
+                self.assertNotIn(environ['APPLE_NOTARY_APP_PASSWORD'], exported)
+                self.assertNotIn(environ['APPLE_DEVELOPER_ID_P12_PASSWORD'], credentials.state_path(environ).read_text())
+                credentials.cleanup(environ)
+                self.assertFalse(credentials.state_path(environ).exists())
 
     def test_cleanup_rejects_arbitrary_keychain(self):
         with tempfile.TemporaryDirectory() as root:

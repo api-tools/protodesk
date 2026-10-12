@@ -244,11 +244,6 @@ class DeskController extends ChangeNotifier {
       return;
     }
     if (method!.clientStreaming) {
-      if (method!.serverStreaming) {
-        status = 'Bidirectional streaming is pending the next increment';
-        emit();
-        return;
-      }
       final invalid = validateQueue(queuedRequests);
       if (invalid != null) {
         status = invalid;
@@ -287,22 +282,38 @@ class DeskController extends ChangeNotifier {
       }
     }
 
+    void onHeaders(Map<String, String> received) {
+      if (generation == _generation) {
+        result = CallResult(
+          List.of(messages),
+          'IN_PROGRESS',
+          '',
+          callClock.elapsedMilliseconds,
+          received,
+          const {},
+        );
+        emit();
+      }
+    }
+
     CallResult response;
     try {
       if (selected.clientStreaming) {
-        requestStream = engine.startClientStream(
+        requestStream = engine.startRequestStream(
           selected,
           metadata: headers,
           timeoutMs: timeoutMs,
           authority: authority,
           onMessage: onMessage,
+          onHeaders: onHeaders,
         );
         for (final value in queuedRequests) {
           requestStream!.send(value);
           outgoing.add(value);
         }
         queuedRequests.clear();
-        status = 'Client stream open; ${outgoing.length} messages sent';
+        status =
+            '${selected.serverStreaming ? 'Bidirectional' : 'Client'} stream open; ${outgoing.length} messages sent';
         emit();
         response = await requestStream!.result;
       } else {
@@ -313,6 +324,7 @@ class DeskController extends ChangeNotifier {
           timeoutMs: timeoutMs,
           authority: authority,
           onMessage: onMessage,
+          onHeaders: onHeaders,
         );
       }
     } catch (e) {

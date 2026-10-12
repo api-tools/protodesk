@@ -42,7 +42,7 @@ def setup(environ):
     state.write_text(json.dumps({'keychain':str(keychain),'previous':previous}))
     state.chmod(0o600)
     try:
-        certificate.write_bytes(base64.b64decode(environ['APPLE_DEVELOPER_ID_P12_BASE64'], validate=True))
+        certificate.write_bytes(base64.b64decode(''.join(environ['APPLE_DEVELOPER_ID_P12_BASE64'].split()), validate=True))
         certificate.chmod(0o600)
         sensitive('Create temporary keychain', ['security', 'create-keychain', '-p', password, str(keychain)])
         sensitive('Configure temporary keychain', ['security', 'set-keychain-settings', '-lut', '21600', str(keychain)])

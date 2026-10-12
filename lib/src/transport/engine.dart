@@ -338,26 +338,18 @@ class GrpcEngine {
     int timeoutMs = 5000,
     String authority = '',
     void Function(Object? message)? onMessage,
+    void Function(Map<String, String> headers)? onHeaders,
   }) async {
     final clock = Stopwatch()..start();
     if (method.clientStreaming) {
-      if (method.serverStreaming) {
-        return const CallResult(
-          [],
-          'UNIMPLEMENTED',
-          'Bidirectional streaming is pending the next increment',
-          0,
-          {},
-          {},
-        );
-      }
       try {
-        final stream = startClientStream(
+        final stream = startRequestStream(
           method,
           metadata: metadata,
           timeoutMs: timeoutMs,
           authority: authority,
           onMessage: onMessage,
+          onHeaders: onHeaders,
         );
         try {
           stream.send(body);
@@ -412,23 +404,20 @@ class GrpcEngine {
       timeoutMs: timeoutMs,
       authority: authority,
       onMessage: onMessage,
+      onHeaders: onHeaders,
     );
   }
 
-  RequestStreamCall startClientStream(
+  RequestStreamCall startRequestStream(
     ProtoMethod method, {
     Map<String, String> metadata = const {},
     int timeoutMs = 5000,
     String authority = '',
     void Function(Object? message)? onMessage,
+    void Function(Map<String, String> headers)? onHeaders,
   }) {
     if (!method.clientStreaming) {
       throw const GrpcError.invalidArgument('Method has no streaming request');
-    }
-    if (method.serverStreaming) {
-      throw const GrpcError.unimplemented(
-        'Bidirectional streaming is pending the next increment',
-      );
     }
     if (_channel == null || _config == null) {
       throw const GrpcError.failedPrecondition('No server connected');
@@ -443,6 +432,7 @@ class GrpcEngine {
           timeoutMs: timeoutMs,
           authority: authority,
           onMessage: onMessage,
+          onHeaders: onHeaders,
         ).whenComplete(() {
           stream._complete();
           _outgoing.remove(stream);
@@ -457,6 +447,7 @@ class GrpcEngine {
     required int timeoutMs,
     required String authority,
     void Function(Object? message)? onMessage,
+    void Function(Map<String, String> headers)? onHeaders,
   }) async {
     final clock = Stopwatch()..start();
     final codec = ProtoCodec(schema);
@@ -475,10 +466,10 @@ class GrpcEngine {
     _calls.add(call);
     var code = 'OK', error = '';
     var bufferedBytes = 0;
-    final headerFuture = call.headers.then(
-      (v) => headers.addAll(v),
-      onError: (Object _) {},
-    );
+    final headerFuture = call.headers.then((v) {
+      headers.addAll(v);
+      onHeaders?.call(Map.unmodifiable(headers));
+    }, onError: (Object _) {});
     try {
       await for (final data in call) {
         bufferedBytes += data.length;

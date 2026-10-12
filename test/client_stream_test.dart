@@ -50,7 +50,7 @@ void main() {
     await directory.delete(recursive: true);
   });
   test('client stream stays open until half-close, snapshots messages and retains metadata', () async {
-    final call = engine.startClientStream(
+    final call = engine.startRequestStream(
       desk.method!,
       metadata: {'x-test': 'client'},
     );
@@ -71,14 +71,14 @@ void main() {
     expect(() => call.send({}), throwsStateError);
   });
   test('empty half-close completes a valid client stream', () async {
-    final call = engine.startClientStream(desk.method!);
+    final call = engine.startRequestStream(desk.method!);
     call.finishSending();
     expect((await call.result).messages.single, {'text': 'upload 0'});
   });
   test(
     'server error closes a client stream without needing half-close',
     () async {
-      final call = engine.startClientStream(desk.method!);
+      final call = engine.startRequestStream(desk.method!);
       call.send({'text': 'error'});
       expect((await call.result).code, 'PERMISSION_DENIED');
       expect(call.inputClosed, true);
@@ -87,14 +87,14 @@ void main() {
   test(
     'cancellation, deadlines and disconnect terminate an open request stream',
     () async {
-      var call = engine.startClientStream(desk.method!);
+      var call = engine.startRequestStream(desk.method!);
       call.send({'text': 'cancel'});
       await engine.cancel();
       expect((await call.result).code, 'CANCELLED');
-      call = engine.startClientStream(desk.method!, timeoutMs: 30);
+      call = engine.startRequestStream(desk.method!, timeoutMs: 30);
       call.send({'text': 'slow'});
       expect((await call.result).code, 'DEADLINE_EXCEEDED');
-      call = engine.startClientStream(desk.method!);
+      call = engine.startRequestStream(desk.method!);
       call.send({'text': 'disconnect'});
       await engine.disconnect();
       expect((await call.result).code, 'CANCELLED');
@@ -102,7 +102,7 @@ void main() {
     },
   );
   test('pending sends and invalid messages are bounded without corrupting the stream', () async {
-    final call = engine.startClientStream(desk.method!);
+    final call = engine.startRequestStream(desk.method!);
     expect(() => call.send({'unknown': true}), throwsFormatException);
     expect(call.sentCount, 0);
     for (var i = 0; i < RequestStreamLimits.queuedMessages; i++) {
@@ -131,7 +131,7 @@ void main() {
       final text = String.fromCharCodes(
         Uint8List(size)..fillRange(0, size, 120),
       );
-      final call = engine.startClientStream(desk.method!);
+      final call = engine.startRequestStream(desk.method!);
       call.send({'text': text});
       expect(
         () => call.send({'text': text}),
