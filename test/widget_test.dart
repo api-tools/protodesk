@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:protodesk/src/presentation/design.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:protodesk/main.dart';
 import 'package:protodesk/src/persistence/store.dart';
@@ -50,6 +52,54 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
       dir.deleteSync(recursive: true);
+    },
+  );
+  testWidgets(
+    'dropdown border is clickable and preserves keyboard focus and selection',
+    (tester) async {
+      String? value = 'one';
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: deskTheme,
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 240,
+                child: StatefulBuilder(
+                  builder: (context, setState) => DeskDropdown<String>(
+                    value: value,
+                    items: const [
+                      DropdownMenuItem(value: 'one', child: Text('One')),
+                      DropdownMenuItem(value: 'two', child: Text('Two')),
+                    ],
+                    onChanged: (selected) => setState(() => value = selected),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final dropdown = find.byType(DeskDropdown<String>);
+      expect(tester.getSize(dropdown).height, DeskSpace.control);
+      await tester.tapAt(tester.getTopLeft(dropdown) + const Offset(3, 3));
+      await tester.pumpAndSettle();
+      expect(find.text('Two'), findsOneWidget);
+      await tester.tap(find.text('Two'));
+      await tester.pumpAndSettle();
+      expect(value, 'two');
+      final decoration = find.descendant(
+        of: dropdown,
+        matching: find.byType(InputDecorator),
+      );
+      expect(tester.widget<InputDecorator>(decoration).isFocused, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('One'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(value, 'two');
+      expect(tester.takeException(), isNull);
     },
   );
   testWidgets('repeated fields keep individual values and remove items', (

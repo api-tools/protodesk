@@ -254,16 +254,9 @@ class _FieldEditorState extends State<FieldEditor> {
           widget.schema.enumNumbers[field.typeName]?.keys.toList() ??
           widget.schema.enums[field.typeName]?.values.toSet().toList() ??
           [];
-      return DropdownButtonFormField<String>(
-        isExpanded: true,
-        style: DeskType.body,
-        initialValue: values.contains(widget.value)
-            ? widget.value as String
-            : null,
-        decoration: const InputDecoration(
-          hintText: 'Unset',
-          contentPadding: DeskSpace.dropdownPadding,
-        ),
+      return DeskDropdown<String>(
+        value: values.contains(widget.value) ? widget.value as String : null,
+        decoration: const InputDecoration(hintText: 'Unset'),
         items: [
           const DropdownMenuItem(value: '', child: Text('Unset')),
           for (final v in values)
@@ -298,10 +291,7 @@ class _FieldEditorState extends State<FieldEditor> {
           maxLines: json ? 4 : 1,
           style: json ? DeskType.code : DeskType.body,
           decoration: InputDecoration(
-            isDense: true,
-            contentPadding: json
-                ? const EdgeInsets.all(DeskSpace.inset)
-                : DeskSpace.fieldPadding,
+            contentPadding: json ? const EdgeInsets.all(DeskSpace.inset) : null,
             errorText: error,
             hintText: json ? '{}' : 'Unset',
             suffixIcon: field.typeName == 'google.protobuf.Timestamp'

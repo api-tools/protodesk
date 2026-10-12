@@ -131,19 +131,15 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                     const SizedBox(width: DeskSpace.inset),
                     SizedBox(
                       width: bounds.maxWidth < 600 ? 160 : 260,
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        style: DeskType.body,
+                      child: DeskDropdown<String>(
                         key: ValueKey(desk.server?['id']),
-                        initialValue:
+                        value:
                             desk.servers.any(
                               (s) => s['id'] == desk.server?['id'],
                             )
                             ? (desk.server?['id'] as String?)
                             : null,
                         decoration: const InputDecoration(
-                          isDense: true,
-                          contentPadding: DeskSpace.dropdownPadding,
                           hintText: 'Select server',
                         ),
                         items: [
@@ -166,22 +162,28 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       ),
                     ),
                     const SizedBox(width: DeskSpace.gap),
-                    FilledButton.icon(
+                    FilledButton(
                       onPressed: desk.connecting
                           ? null
                           : desk.connected
                           ? desk.disconnect
                           : desk.connect,
-                      icon: Icon(
-                        desk.connected ? Icons.link_off : Icons.bolt,
-                        size: 18,
-                      ),
-                      label: Text(
-                        desk.connecting
-                            ? 'Connecting…'
-                            : desk.connected
-                            ? 'Disconnect'
-                            : 'Connect',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            desk.connected ? Icons.link_off : Icons.bolt,
+                            size: 18,
+                          ),
+                          const SizedBox(width: DeskSpace.gap),
+                          Text(
+                            desk.connecting
+                                ? 'Connecting…'
+                                : desk.connected
+                                ? 'Disconnect'
+                                : 'Connect',
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -215,7 +217,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'ProtoDesk',
-                        applicationVersion: '1.0.2',
+                        applicationVersion: '1.0.3',
                         applicationLegalese:
                             'MIT License · © 2026 ProtoDesk contributors',
                       ),
@@ -330,7 +332,6 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
             decoration: const InputDecoration(
               hintText: 'Filter services or methods',
               prefixIcon: Icon(Icons.search, size: 18),
-              isDense: true,
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -553,28 +554,16 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
             ),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(
-                    value: false,
-                    label: Text('Form'),
-                    icon: Icon(Icons.list_alt, size: 16),
-                  ),
-                  ButtonSegment(
-                    value: true,
-                    label: Text('JSON'),
-                    icon: Icon(Icons.code, size: 16),
-                  ),
-                ],
-                selected: {jsonMode},
-                onSelectionChanged: (value) {
-                  if (!value.first && desk.validateBody(desk.body) != null) {
+              child: DeskModeSwitch(
+                json: jsonMode,
+                onChanged: (value) {
+                  if (!value && desk.validateBody(desk.body) != null) {
                     desk.status =
                         'Fix the JSON request before switching to Form';
                     desk.emit();
                     return;
                   }
-                  setState(() => jsonMode = value.first);
+                  setState(() => jsonMode = value);
                 },
               ),
             ),

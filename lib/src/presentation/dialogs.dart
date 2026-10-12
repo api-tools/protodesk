@@ -345,13 +345,9 @@ Future<void> saveExample(
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              style: DeskType.body,
-              initialValue: collection,
-              decoration: const InputDecoration(
-                contentPadding: DeskSpace.dropdownPadding,
-              ),
+            DeskDropdown<String>(
+              value: collection,
+              decoration: const InputDecoration(),
               items: [
                 for (final c in desk.collections)
                   DropdownMenuItem(
