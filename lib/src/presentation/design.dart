@@ -22,14 +22,14 @@ abstract final class DeskType {
   );
   static const secondary = TextStyle(
     fontFamily: 'Satoshi',
-    fontSize: 12,
-    height: 1.5,
+    fontSize: 13,
+    height: 18 / 13,
     fontWeight: FontWeight.w400,
   );
   static const title = TextStyle(
     fontFamily: 'Satoshi',
-    fontSize: 18,
-    height: 24 / 18,
+    fontSize: 13,
+    height: 18 / 13,
     fontWeight: FontWeight.w700,
   );
   static const code = TextStyle(

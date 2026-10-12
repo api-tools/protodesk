@@ -24,7 +24,8 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
       authority = TextEditingController(),
       search = TextEditingController(),
       responseSearch = TextEditingController();
-  double navigationWidth = 260, requestFraction = .5;
+  double? navigationWidth;
+  double requestFraction = .5;
   bool jsonMode = false;
   final responseTree = GlobalKey<ResponseTreeState>();
   final collapsed = <String>{};
@@ -105,112 +106,136 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
     body: SafeArea(
       child: Column(
         children: [
-          Container(
+          Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: DeskSpace.panel,
               vertical: DeskSpace.inset,
             ),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                const Row(
+            child: LayoutBuilder(
+              builder: (context, bounds) {
+                final connection = Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.hub_outlined,
-                      color: Color(0xff55d6b0),
-                      size: 25,
-                    ),
-                    SizedBox(width: 9),
-                    Text('ProtoDesk', style: DeskType.title),
-                  ],
-                ),
-                SizedBox(
-                  width: 290,
-                  child: DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    style: DeskType.body,
-                    key: ValueKey(desk.server?['id']),
-                    initialValue:
-                        desk.servers.any((s) => s['id'] == desk.server?['id'])
-                        ? (desk.server?['id'] as String?)
-                        : null,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding: DeskSpace.dropdownPadding,
-                      labelText: 'Server',
-                    ),
-                    items: [
-                      for (final s in desk.servers)
-                        DropdownMenuItem(
-                          value: s['id'] as String,
-                          child: Text(
-                            '${s['name']} · ${s['address']}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                    const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.hub_outlined,
+                          color: Color(0xff55d6b0),
+                          size: 25,
                         ),
+                        SizedBox(width: 9),
+                        Text('ProtoDesk', style: DeskType.title),
+                      ],
+                    ),
+                    const SizedBox(width: DeskSpace.inset),
+                    SizedBox(
+                      width: bounds.maxWidth < 600 ? 160 : 260,
+                      child: DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        style: DeskType.body,
+                        key: ValueKey(desk.server?['id']),
+                        initialValue:
+                            desk.servers.any(
+                              (s) => s['id'] == desk.server?['id'],
+                            )
+                            ? (desk.server?['id'] as String?)
+                            : null,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding: DeskSpace.dropdownPadding,
+                          hintText: 'Select server',
+                        ),
+                        items: [
+                          for (final s in desk.servers)
+                            DropdownMenuItem(
+                              value: s['id'] as String,
+                              child: Text(
+                                '${s['name']} · ${s['address']}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: desk.connecting
+                            ? null
+                            : (id) {
+                                desk.selectServer(
+                                  desk.servers.firstWhere((s) => s['id'] == id),
+                                );
+                              },
+                      ),
+                    ),
+                    const SizedBox(width: DeskSpace.gap),
+                    FilledButton.icon(
+                      onPressed: desk.connecting
+                          ? null
+                          : desk.connected
+                          ? desk.disconnect
+                          : desk.connect,
+                      icon: Icon(
+                        desk.connected ? Icons.link_off : Icons.bolt,
+                        size: 18,
+                      ),
+                      label: Text(
+                        desk.connecting
+                            ? 'Connecting…'
+                            : desk.connected
+                            ? 'Disconnect'
+                            : 'Connect',
+                      ),
+                    ),
+                  ],
+                );
+                final management = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    button(
+                      'Servers',
+                      Icons.dns_outlined,
+                      () => showServers(context, desk),
+                    ),
+                    button(
+                      'Collections',
+                      Icons.folder_outlined,
+                      () => showCollections(context, desk),
+                    ),
+                    button(
+                      'History',
+                      Icons.history,
+                      () => showHistory(context, desk),
+                    ),
+                    button(
+                      'Workspace',
+                      Icons.import_export,
+                      () => showWorkspace(context, desk),
+                    ),
+                    IconButton(
+                      tooltip: 'About ProtoDesk',
+                      icon: const Icon(Icons.info_outline, size: 18),
+                      onPressed: () => showAboutDialog(
+                        context: context,
+                        applicationName: 'ProtoDesk',
+                        applicationVersion: '1.0.2',
+                        applicationLegalese:
+                            'MIT License · © 2026 ProtoDesk contributors',
+                      ),
+                    ),
+                  ],
+                );
+                if (bounds.maxWidth < 1120) {
+                  return Column(
+                    children: [
+                      Align(alignment: Alignment.centerLeft, child: connection),
+                      const SizedBox(height: DeskSpace.small),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: management,
+                      ),
                     ],
-                    onChanged: desk.connecting
-                        ? null
-                        : (id) {
-                            desk.selectServer(
-                              desk.servers.firstWhere((s) => s['id'] == id),
-                            );
-                          },
-                  ),
-                ),
-                FilledButton.icon(
-                  onPressed: desk.connecting
-                      ? null
-                      : desk.connected
-                      ? desk.disconnect
-                      : desk.connect,
-                  icon: Icon(
-                    desk.connected ? Icons.link_off : Icons.bolt,
-                    size: 18,
-                  ),
-                  label: Text(
-                    desk.connecting
-                        ? 'Connecting…'
-                        : desk.connected
-                        ? 'Disconnect'
-                        : 'Connect',
-                  ),
-                ),
-                button(
-                  'Servers',
-                  Icons.dns_outlined,
-                  () => showServers(context, desk),
-                ),
-                button(
-                  'Collections',
-                  Icons.folder_outlined,
-                  () => showCollections(context, desk),
-                ),
-                button(
-                  'History',
-                  Icons.history,
-                  () => showHistory(context, desk),
-                ),
-                button(
-                  'Workspace',
-                  Icons.import_export,
-                  () => showWorkspace(context, desk),
-                ),
-                IconButton(
-                  tooltip: 'About ProtoDesk',
-                  icon: const Icon(Icons.info_outline, size: 18),
-                  onPressed: () => showAboutDialog(
-                    context: context,
-                    applicationName: 'ProtoDesk',
-                    applicationVersion: '1.0.1',
-                    applicationLegalese:
-                        'MIT License · © 2026 ProtoDesk contributors',
-                  ),
-                ),
-              ],
+                  );
+                }
+                return Row(children: [connection, const Spacer(), management]);
+              },
             ),
           ),
           if (desk.warning.isNotEmpty)
@@ -230,7 +255,13 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
             child: LayoutBuilder(
               builder: (context, bounds) {
                 final width = bounds.maxWidth - 32;
-                final nav = min(navigationWidth, width * .3);
+                final usable = width - 24;
+                final nav = (navigationWidth ?? usable / 3)
+                    .clamp(
+                      min(180.0, usable / 3),
+                      max(usable / 3, usable - 2 * DeskSpace.minimumPane),
+                    )
+                    .toDouble();
                 final rest = max(200.0, width - nav - 24);
                 final minimum = min(.5, DeskSpace.minimumPane / rest);
                 final maximum = max(.5, 1 - DeskSpace.minimumPane / rest);
@@ -240,17 +271,25 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      SizedBox(width: nav, child: navigation()),
+                      SizedBox(
+                        key: const ValueKey('services-pane'),
+                        width: nav,
+                        child: navigation(),
+                      ),
                       divider(
                         'Resize service navigation',
                         (dx) => setState(
-                          () => navigationWidth = (navigationWidth + dx).clamp(
-                            180,
-                            450,
+                          () => navigationWidth = (nav + dx).clamp(
+                            min(180.0, usable / 3),
+                            max(usable / 3, usable - 2 * DeskSpace.minimumPane),
                           ),
                         ),
                       ),
-                      SizedBox(width: rest * fraction, child: requestPanel()),
+                      SizedBox(
+                        key: const ValueKey('request-pane'),
+                        width: rest * fraction,
+                        child: requestPanel(),
+                      ),
                       divider(
                         'Resize request and response panes',
                         (dx) => setState(
@@ -260,7 +299,12 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                           ),
                         ),
                       ),
-                      Expanded(child: responsePanel()),
+                      Expanded(
+                        child: SizedBox(
+                          key: const ValueKey('response-pane'),
+                          child: responsePanel(),
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -377,7 +421,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                 Expanded(
                   child: Text(
                     text,
-                    style: service ? DeskType.heading : DeskType.label,
+                    style: service ? DeskType.heading : DeskType.body,
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   ),
@@ -442,32 +486,6 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       ),
                       const SizedBox(height: DeskSpace.gap),
                     ],
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(
-                          value: false,
-                          label: Text('Form'),
-                          icon: Icon(Icons.list_alt, size: 16),
-                        ),
-                        ButtonSegment(
-                          value: true,
-                          label: Text('JSON'),
-                          icon: Icon(Icons.code, size: 16),
-                        ),
-                      ],
-                      selected: {jsonMode},
-                      onSelectionChanged: (value) {
-                        if (!value.first &&
-                            desk.validateBody(desk.body) != null) {
-                          desk.status =
-                              'Fix the JSON request before switching to Form';
-                          desk.emit();
-                          return;
-                        }
-                        setState(() => jsonMode = value.first);
-                      },
-                    ),
-                    const SizedBox(height: DeskSpace.panel),
                     if (jsonMode)
                       TextField(
                         controller: request,
@@ -476,6 +494,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                         style: DeskType.code,
                         decoration: InputDecoration(
                           labelText: 'Protobuf JSON',
+                          contentPadding: const EdgeInsets.all(DeskSpace.inset),
                           alignLabelWithHint: true,
                           errorText: desk.validateBody(desk.body),
                         ),
@@ -524,6 +543,42 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                   ],
                 ),
         ),
+        if (desk.method != null)
+          Container(
+            key: const ValueKey('request-mode-bar'),
+            width: double.infinity,
+            padding: const EdgeInsets.all(DeskSpace.gap),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Color(0xff303b47))),
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: false,
+                    label: Text('Form'),
+                    icon: Icon(Icons.list_alt, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    label: Text('JSON'),
+                    icon: Icon(Icons.code, size: 16),
+                  ),
+                ],
+                selected: {jsonMode},
+                onSelectionChanged: (value) {
+                  if (!value.first && desk.validateBody(desk.body) != null) {
+                    desk.status =
+                        'Fix the JSON request before switching to Form';
+                    desk.emit();
+                    return;
+                  }
+                  setState(() => jsonMode = value.first);
+                },
+              ),
+            ),
+          ),
       ],
     ),
   );
@@ -560,28 +615,20 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(child: Text(f.jsonName, style: DeskType.label)),
-                  Flexible(
-                    child: Text(
-                      '${f.repeated ? 'repeated ' : ''}${f.typeName.isEmpty ? typeLabel(f.type) : f.typeName.split('.').last}',
-                      style: DeskType.secondary.copyWith(color: Colors.grey),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Unset ${f.jsonName}',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () {
-                      body.remove(f.jsonName);
-                      body.remove(f.name);
-                      desk.setBody(pretty.convert(body));
-                    },
-                    icon: const Icon(Icons.close, size: 14),
-                  ),
-                ],
+              FieldHeading(
+                field: f,
+                action: IconButton(
+                  tooltip: 'Unset ${f.jsonName}',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () {
+                    body.remove(f.jsonName);
+                    body.remove(f.name);
+                    desk.setBody(pretty.convert(body));
+                  },
+                  icon: const Icon(Icons.close, size: 14),
+                ),
               ),
+              const SizedBox(height: DeskSpace.small),
               FieldEditor(
                 key: ValueKey('${desk.method!.path}-${f.name}'),
                 field: f,
