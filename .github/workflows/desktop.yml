@@ -42,6 +42,8 @@ jobs:
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed lib test tool
       - run: flutter analyze
+      - name: Distribution script regression tests
+        run: python -m unittest discover -s tool -p "test_*.py"
       - name: Tests
         shell: bash
         run: |
@@ -50,7 +52,7 @@ jobs:
       - run: flutter build ${{ matrix.target }} --release
       - name: Sign and package macOS
         if: runner.os == 'macOS'
-        run: sh tool/package_macos.sh
+        run: python3 tool/package_macos.py development
       - name: Compiled macOS smoke
         if: runner.os == 'macOS'
         run: python3 tool/smoke_release.py build/macos/Build/Products/Release/ProtoDesk.app/Contents/MacOS/ProtoDesk
@@ -78,23 +80,84 @@ jobs:
           Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/ProtoDesk-windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: ProtoDesk-${{ matrix.target }}
+          name: ${{ matrix.target == 'macos' && 'ProtoDesk-macos-development' || format('ProtoDesk-{0}', matrix.target) }}
           path: dist/*
+  notarize:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: macos-latest
+    environment: macos-release
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a main-branch release commit
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Install exact official Flutter source
+        run: |
+          git clone --depth 1 --branch 3.47.7 https://github.com/flutter/flutter.git ../flutter-sdk
+          test "$(git -C ../flutter-sdk rev-parse HEAD)" = abaf9c523780a608bd46686fd5e53740a07077f8
+          echo "$PWD/../flutter-sdk/bin" >> "$GITHUB_PATH"
+      - run: flutter --version
+      - run: python3 tool/prepare_protoc.py
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - name: Prepare protected temporary signing keychain
+        env:
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+        run: python3 tool/macos_ci_credentials.py setup
+      - name: Developer ID, notarize, staple, Gatekeeper and extracted-artifact smoke
+        run: sh tool/package_macos.sh
+      - name: Always remove signing credentials
+        if: always()
+        run: python3 tool/macos_ci_credentials.py cleanup
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProtoDesk-macos-notarized
+          path: |
+            dist/release/ProtoDesk-macos-universal.zip
+            dist/release/macos-notarization.json
+          if-no-files-found: error
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, notarize]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: ProtoDesk-windows
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProtoDesk-linux
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProtoDesk-macos-notarized
+          path: dist
+      - name: Require signed artifact evidence
+        run: |
+          python3 - <<'PY_VERIFY'
+          import hashlib, json, pathlib
+          root = pathlib.Path('dist')
+          evidence = json.loads((root / 'macos-notarization.json').read_text())
+          assert evidence['status'] == 'Accepted' and evidence['stapled'] and evidence['gatekeeper'] == 'accepted' and evidence['extractedSmoke'] == 'passed'
+          assert hashlib.sha256((root / evidence['archive']).read_bytes()).hexdigest() == evidence['sha256']
+          assert not list(root.glob('*development*'))
+          PY_VERIFY
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --title "ProtoDesk ${GITHUB_REF_NAME}" --notes "Flutter desktop release. macOS is ad-hoc signed and not notarized; Windows is unsigned. Extract the complete bundle before running. No Flutter, Dart, or protoc installation is required." dist/*
+          gh release create "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --title "ProtoDesk ${GITHUB_REF_NAME}" --notes "Flutter desktop release. macOS is Developer ID signed, notarized and stapled; Windows is unsigned. Extract the complete bundle before running. No Flutter, Dart, or protoc installation is required." dist/*
