@@ -108,7 +108,10 @@ class _FieldEditorState extends State<FieldEditor> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.all(DeskSpace.inset),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: DeskSpace.gap,
+                      vertical: 9,
+                    ),
                     child: Text('$i'),
                   ),
                   Expanded(
@@ -200,24 +203,7 @@ class _FieldEditorState extends State<FieldEditor> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(f.jsonName, style: DeskType.label),
-                            ),
-                            Flexible(
-                              child: Text(
-                                f.typeName.isEmpty
-                                    ? typeLabel(f.type)
-                                    : f.typeName.split('.').last,
-                                style: DeskType.secondary.copyWith(
-                                  color: Colors.grey,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
+                        FieldHeading(field: f),
                         const SizedBox(height: DeskSpace.small),
                         FieldEditor(
                           key: ValueKey(f.name),
@@ -275,7 +261,7 @@ class _FieldEditorState extends State<FieldEditor> {
             ? widget.value as String
             : null,
         decoration: const InputDecoration(
-          labelText: 'Enum',
+          hintText: 'Unset',
           contentPadding: DeskSpace.dropdownPadding,
         ),
         items: [
@@ -313,6 +299,9 @@ class _FieldEditorState extends State<FieldEditor> {
           style: json ? DeskType.code : DeskType.body,
           decoration: InputDecoration(
             isDense: true,
+            contentPadding: json
+                ? const EdgeInsets.all(DeskSpace.inset)
+                : DeskSpace.fieldPadding,
             errorText: error,
             hintText: json ? '{}' : 'Unset',
             suffixIcon: field.typeName == 'google.protobuf.Timestamp'
@@ -397,3 +386,30 @@ String typeLabel(int type) =>
       18: 'sint64',
     }[type] ??
     'unknown';
+
+/// One heading treatment for top-level, nested and repeated fields.
+class FieldHeading extends StatelessWidget {
+  final ProtoField field;
+  final Widget? action;
+  const FieldHeading({super.key, required this.field, this.action});
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(child: Text(field.jsonName, style: DeskType.label)),
+      const SizedBox(width: DeskSpace.gap),
+      Flexible(
+        fit: FlexFit.tight,
+        child: Tooltip(
+          message: field.typeName,
+          child: Text(
+            '${field.repeated ? 'repeated ' : ''}${typeLabel(field.type)}${field.typeName.isEmpty ? '' : ' · ${field.typeName.split('.').last}'}',
+            textAlign: TextAlign.right,
+            style: DeskType.secondary.copyWith(color: Colors.grey),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+      ?action,
+    ],
+  );
+}

@@ -60,7 +60,24 @@ void main() {
           type: 11,
           typeName: 'example.Nested',
         ),
+        const ProtoField(
+          name: 'mode',
+          jsonName: 'mode',
+          number: 5,
+          type: 14,
+          typeName: 'example.Mode',
+        ),
+        const ProtoField(
+          name: 'children',
+          jsonName: 'children',
+          number: 6,
+          type: 11,
+          typeName: 'example.Nested',
+          label: 3,
+        ),
       ]);
+      schema.enumNumbers['example.Mode'] = {'MODE_UNSET': 0, 'MODE_ACTIVE': 1};
+      schema.enums['example.Mode'] = {0: 'MODE_UNSET', 1: 'MODE_ACTIVE'};
       schema.messages['example.Nested'] = ProtoMessage('example.Nested', [
         const ProtoField(name: 'value', jsonName: 'value', number: 1, type: 9),
       ]);
@@ -72,9 +89,17 @@ void main() {
       );
       schema.methods[method.path] = method;
       desk.schema = schema;
+      desk.servers = [
+        {
+          'id': 'fixture',
+          'name': 'Local fixture',
+          'address': '127.0.0.1:50051',
+        },
+      ];
+      desk.server = desk.servers.first;
       desk.connected = true;
       desk.method = method;
-      desk.body = '{"name":"Populated nested request", "enabled":true, "labels":["desktop", "compact"], "nested":{"value":"Nested text remains editable"}}';
+      desk.body = '{"name":"Populated nested request", "enabled":true, "labels":["desktop", "compact"], "nested":{"value":"Nested text remains editable"}, "mode":"MODE_ACTIVE", "children":[{"value":"Repeated child"}]}';
       desk.metadata = '{"x-request-context":"desktop-review", "authorization":"Bearer test-only-token"}';
       desk.messages.add({
         'greeting': 'Hello, ProtoDesk',
@@ -113,13 +138,41 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final widths = [
+        'services-pane',
+        'request-pane',
+        'response-pane',
+      ].map((id) => tester.getSize(find.byKey(ValueKey(id))).width).toList();
+      expect(widths[0], closeTo(widths[1], .01));
+      expect(widths[1], closeTo(widths[2], .01));
+      final footer = find.byKey(const ValueKey('request-mode-bar'));
+      expect(tester.getBottomRight(footer).dy, lessThan(860));
       await tester.enterText(find.byType(TextField).at(1), 'Ada');
       await tester.pump();
       expect(desk.body, contains('Ada'));
-      await tester.tap(find.text('JSON').first);
+      await tester.tap(
+        find.descendant(of: footer, matching: find.text('JSON')),
+      );
       await tester.pumpAndSettle();
       expect(find.textContaining('Protobuf JSON'), findsOneWidget);
-      await tester.tap(find.text('Form').first);
+      final jsonEditor = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Protobuf JSON',
+      );
+      await tester.enterText(jsonEditor, '{invalid');
+      await tester.tap(
+        find.descendant(of: footer, matching: find.text('Form')),
+      );
+      await tester.pump();
+      expect(jsonEditor, findsOneWidget);
+      expect(desk.body, '{invalid');
+      await tester.enterText(
+        jsonEditor,
+        '{"name":"Ada","mode":"MODE_ACTIVE","nested":{"value":"Nested text remains editable"},"children":[{"value":"Repeated child"}],"labels":["desktop","compact"]}',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.descendant(of: footer, matching: find.text('Form')),
+      );
       await tester.pumpAndSettle();
       expect(desk.body, contains('Ada'));
       expect(tester.takeException(), isNull);
@@ -151,6 +204,28 @@ void main() {
       await tester.tap(find.byTooltip('Expand all'));
       await tester.pump();
       await screenshot('');
+      await tester.tap(
+        find.descendant(of: footer, matching: find.text('JSON')),
+      );
+      await tester.pumpAndSettle();
+      await screenshot('json');
+      await tester.tap(
+        find.descendant(of: footer, matching: find.text('Form')),
+      );
+      await tester.pumpAndSettle();
+      final requestViewport = find
+          .descendant(
+            of: find.byType(ListView).at(1),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final fixedFooterY = tester.getTopLeft(footer).dy;
+      await tester.drag(requestViewport, const Offset(0, -370));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(footer).dy, fixedFooterY);
+      await screenshot('nested-repeated');
+      await tester.drag(requestViewport, const Offset(0, 600));
+      await tester.pumpAndSettle();
       tester.view.physicalSize = const Size(1000, 650);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -185,6 +260,8 @@ void main() {
         150,
         scrollable: requestScroll,
       );
+      await tester.drag(requestScroll, const Offset(0, -100));
+      await tester.pumpAndSettle();
       await tester.tap(requestOptions);
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
@@ -195,6 +272,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('x-request-context'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      expect(tester.getTopLeft(footer).dy, greaterThan(0));
+      expect(tester.getTopLeft(footer).dy, lessThan(650));
       await screenshot('request-metadata');
       final checkbox = find
           .descendant(
