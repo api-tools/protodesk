@@ -11,6 +11,8 @@ import 'package:protodesk/src/presentation/controller.dart';
 import 'package:protodesk/src/schema/schema.dart';
 import 'package:protodesk/src/schema/proto_loader.dart';
 import 'package:protodesk/src/transport/engine.dart';
+import 'package:protodesk/src/presentation/design.dart';
+import 'package:protodesk/src/presentation/workspace.dart';
 
 void main() {
   testWidgets(
@@ -20,11 +22,14 @@ void main() {
         final icons = FontLoader('MaterialIcons')
           ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
         await icons.load();
-        for (final family in ['Satoshi', 'monospace']) {
-          final loader = FontLoader(family)
-            ..addFont(rootBundle.load('assets/fonts/Satoshi-Regular.ttf'));
-          await loader.load();
+        final satoshi = FontLoader('Satoshi');
+        for (final weight in ['Regular', 'Medium', 'Bold']) {
+          satoshi.addFont(rootBundle.load('assets/fonts/Satoshi-$weight.ttf'));
         }
+        await satoshi.load();
+        await (FontLoader(
+          'RobotoMono',
+        )..addFont(rootBundle.load('assets/fonts/RobotoMono.ttf'))).load();
       });
       final dir = Directory.systemTemp.createTempSync('desk-layout-');
       final store = WorkspaceStore.open('${dir.path}/data.sqlite');
@@ -60,8 +65,8 @@ void main() {
         const ProtoField(name: 'value', jsonName: 'value', number: 1, type: 9),
       ]);
       const method = ProtoMethod(
-        'example.Greeter',
-        'SayHello',
+        'example.workspace.v1.WorkspaceAdministrationService',
+        'GenerateDetailedWorkspaceCoverageReportForSelectedTenant',
         'example.Request',
         'example.Request',
       );
@@ -69,17 +74,31 @@ void main() {
       desk.schema = schema;
       desk.connected = true;
       desk.method = method;
+      desk.body = '{"name":"Populated nested request", "enabled":true, "labels":["desktop", "compact"], "nested":{"value":"Nested text remains editable"}}';
+      desk.metadata = '{"x-request-context":"desktop-review", "authorization":"Bearer test-only-token"}';
       desk.messages.add({
         'greeting': 'Hello, ProtoDesk',
-        'details': {'runtimeSchema': true, 'latencyMs': 14},
+        'details': {
+          'runtimeSchema': true,
+          'latencyMs': 14,
+          'nested': {
+            'tenant': 'Ada Lovelace',
+            'tags': ['desktop', 'needle'],
+          },
+        },
+        'longKeyWithReadableQuotedStringValue': 'A long response value wraps while retaining its complete JSON contents.',
       });
       desk.result = const CallResult(
         [],
         'OK',
         '',
         14,
-        {'server': 'fixture'},
-        {'status': 'complete'},
+        {
+          'server': 'fixture',
+          'x-long-response-header':
+              'A readable metadata value across a narrow window',
+        },
+        {'status': 'complete', 'grpc-message': 'finished'},
       );
       desk.status = 'OK · 14 ms';
       tester.view.physicalSize = const Size(1360, 860);
@@ -105,18 +124,108 @@ void main() {
       expect(desk.body, contains('Ada'));
       expect(tester.takeException(), isNull);
       final output = Platform.environment['PROTODESK_LAYOUT_PNG'];
-      if (output != null) {
+      Future<void> screenshot(String suffix) async {
+        if (output == null) return;
         await tester.runAsync(() async {
           final boundary =
               key.currentContext!.findRenderObject() as RenderRepaintBoundary;
           final image = await boundary.toImage();
           final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-          await File(output).writeAsBytes(bytes!.buffer.asUint8List());
+          final path = suffix.isEmpty
+              ? output
+              : output.replaceAll('.png', '-$suffix.png');
+          await File(path).writeAsBytes(bytes!.buffer.asUint8List());
         });
       }
-      tester.view.physicalSize = const Size(1000, 700);
+
+      expect(find.byIcon(Icons.waves), findsNothing);
+      expect(find.byIcon(Icons.arrow_forward), findsNothing);
+      final navRow = find
+          .ancestor(of: find.text(method.name), matching: find.byType(SizedBox))
+          .first;
+      expect(tester.getSize(navRow).height, DeskSpace.row);
+      expect(
+        tester.getSize(find.byType(TextField).at(1)).height,
+        closeTo(DeskSpace.control, 2),
+      );
+      await tester.tap(find.byTooltip('Expand all'));
+      await tester.pump();
+      await screenshot('');
+      tester.view.physicalSize = const Size(1000, 650);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      await screenshot('small');
+      await tester.enterText(find.byType(TextField).last, 'needle');
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('json-row:/details/nested/tags/1')),
+        findsOneWidget,
+      );
+      await screenshot('search');
+      await tester.tap(find.byTooltip('Clear JSON search'));
+      await tester.pump();
+      await tester.tap(find.text('Headers / trailers'));
+      await tester.pumpAndSettle();
+      expect(find.text('Response metadata'), findsOneWidget);
+      expect(find.text('Headers'), findsOneWidget);
+      expect(find.text('Trailers'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await screenshot('metadata');
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      final requestOptions = find.text('Metadata & call options');
+      final requestScroll = find
+          .descendant(
+            of: find.byType(ListView).at(1),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(
+        requestOptions,
+        150,
+        scrollable: requestScroll,
+      );
+      await tester.tap(requestOptions);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Add header'),
+        100,
+        scrollable: requestScroll,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('x-request-context'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await screenshot('request-metadata');
+      final checkbox = find
+          .descendant(
+            of: find.byType(MetadataEditor),
+            matching: find.byType(Checkbox),
+          )
+          .first;
+      await tester.tap(checkbox);
+      await tester.pump();
+      expect(desk.metadata, isNot(contains('x-request-context')));
+      desk.emit();
+      await tester.pump();
+      expect(find.text('x-request-context'), findsOneWidget);
+      // Resizing into narrow panes must keep search/clear and call controls usable.
+      await tester.drag(
+        find.bySemanticsLabel('Resize request and response panes'),
+        const Offset(200, 0),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'needle');
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byTooltip('Clear JSON search'));
+      await tester.pump();
+      await tester.drag(
+        find.bySemanticsLabel('Resize request and response panes'),
+        const Offset(-400, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
       await tester.pumpWidget(const SizedBox());
       dir.deleteSync(recursive: true);
     },

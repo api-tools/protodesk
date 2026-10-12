@@ -8,6 +8,8 @@ import 'controller.dart';
 import 'dialogs.dart';
 import 'field_editor.dart';
 import 'response_tree.dart';
+import 'design.dart';
+import 'call_status.dart';
 
 class DeskWorkspace extends StatefulWidget {
   final DeskController desk;
@@ -23,7 +25,8 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
       search = TextEditingController(),
       responseSearch = TextEditingController();
   double navigationWidth = 260, requestFraction = .5;
-  bool jsonMode = false, treeMode = true;
+  bool jsonMode = false;
+  final responseTree = GlobalKey<ResponseTreeState>();
   final collapsed = <String>{};
   DeskController get desk => widget.desk;
   @override
@@ -63,18 +66,20 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
     child: child,
   );
   Widget title(String text, [Widget? trailing]) => Container(
-    height: 52,
+    height: DeskSpace.header,
     padding: const EdgeInsets.symmetric(horizontal: 16),
     decoration: const BoxDecoration(
       border: Border(bottom: BorderSide(color: Color(0xff303b47))),
     ),
     child: Row(
       children: [
-        Text(
-          text,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        Expanded(
+          child: Text(
+            text,
+            style: DeskType.heading,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-        const Spacer(),
         ?trailing,
       ],
     ),
@@ -101,7 +106,10 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            padding: const EdgeInsets.symmetric(
+              horizontal: DeskSpace.panel,
+              vertical: DeskSpace.inset,
+            ),
             child: Wrap(
               spacing: 12,
               runSpacing: 8,
@@ -116,19 +124,14 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       size: 25,
                     ),
                     SizedBox(width: 9),
-                    Text(
-                      'ProtoDesk',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    Text('ProtoDesk', style: DeskType.title),
                   ],
                 ),
                 SizedBox(
                   width: 290,
                   child: DropdownButtonFormField<String>(
                     isExpanded: true,
+                    style: DeskType.body,
                     key: ValueKey(desk.server?['id']),
                     initialValue:
                         desk.servers.any((s) => s['id'] == desk.server?['id'])
@@ -136,6 +139,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                         : null,
                     decoration: const InputDecoration(
                       isDense: true,
+                      contentPadding: DeskSpace.dropdownPadding,
                       labelText: 'Server',
                     ),
                     items: [
@@ -201,7 +205,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                   onPressed: () => showAboutDialog(
                     context: context,
                     applicationName: 'ProtoDesk',
-                    applicationVersion: '1.0.0',
+                    applicationVersion: '1.0.1',
                     applicationLegalese:
                         'MIT License · © 2026 ProtoDesk contributors',
                   ),
@@ -217,7 +221,9 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
               color: const Color(0xff433623),
               child: SelectableText(
                 desk.warning,
-                style: const TextStyle(color: Color(0xffffd38a), fontSize: 12),
+                style: DeskType.secondary.copyWith(
+                  color: const Color(0xffffd38a),
+                ),
               ),
             ),
           Expanded(
@@ -226,6 +232,9 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                 final width = bounds.maxWidth - 32;
                 final nav = min(navigationWidth, width * .3);
                 final rest = max(200.0, width - nav - 24);
+                final minimum = min(.5, DeskSpace.minimumPane / rest);
+                final maximum = max(.5, 1 - DeskSpace.minimumPane / rest);
+                final fraction = requestFraction.clamp(minimum, maximum);
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
@@ -241,15 +250,14 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                           ),
                         ),
                       ),
-                      SizedBox(
-                        width: rest * requestFraction,
-                        child: requestPanel(),
-                      ),
+                      SizedBox(width: rest * fraction, child: requestPanel()),
                       divider(
                         'Resize request and response panes',
                         (dx) => setState(
-                          () => requestFraction = (requestFraction + dx / rest)
-                              .clamp(.25, .75),
+                          () => requestFraction = (fraction + dx / rest).clamp(
+                            minimum,
+                            maximum,
+                          ),
                         ),
                       ),
                       Expanded(child: responsePanel()),
@@ -259,30 +267,9 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
               },
             ),
           ),
-          Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Icon(
-                  desk.connected ? Icons.circle : Icons.circle_outlined,
-                  size: 8,
-                  color: desk.connected ? const Color(0xff55d6b0) : Colors.grey,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: SelectableText(
-                    desk.status,
-                    style: const TextStyle(fontSize: 12),
-                    maxLines: 1,
-                  ),
-                ),
-                Text(
-                  '${desk.schema.services.length} services · ${desk.schema.methods.length} methods',
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-              ],
-            ),
+          CallStatusBar(
+            desk: desk,
+            onMetadata: () => showResponseMetadata(context, desk.result),
           ),
         ],
       ),
@@ -293,7 +280,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
       children: [
         title('SERVICES'),
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(DeskSpace.inset),
           child: TextField(
             controller: search,
             decoration: const InputDecoration(
@@ -313,7 +300,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       desk.connected
                           ? 'No services found. Enable reflection or configure proto sources in Servers.'
                           : 'Connect to a server to discover its APIs.',
-                      style: const TextStyle(color: Colors.grey, fontSize: 13),
+                      style: DeskType.body.copyWith(color: Colors.grey),
                     ),
                   ),
                 )
@@ -327,22 +314,11 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                               search.text.toLowerCase(),
                             ),
                       )) ...[
-                        ListTile(
-                          dense: true,
-                          title: Text(
-                            service,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          leading: Icon(
-                            collapsed.contains(service)
-                                ? Icons.chevron_right
-                                : Icons.expand_more,
-                            size: 18,
-                          ),
-                          onTap: () => setState(() {
+                        _navigationRow(
+                          service,
+                          service: true,
+                          expanded: !collapsed.contains(service),
+                          action: () => setState(() {
                             if (!collapsed.add(service)) {
                               collapsed.remove(service);
                             }
@@ -356,39 +332,10 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                                   search.text.toLowerCase(),
                                 ),
                           ))
-                            ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.only(
-                                left: 28,
-                                right: 8,
-                              ),
+                            _navigationRow(
+                              m.name,
                               selected: desk.method?.path == m.path,
-                              selectedTileColor: const Color(0xff254438),
-                              leading: Icon(
-                                m.serverStreaming
-                                    ? Icons.waves
-                                    : Icons.arrow_forward,
-                                size: 16,
-                                color: m.clientStreaming
-                                    ? Colors.grey
-                                    : const Color(0xff55d6b0),
-                              ),
-                              title: Text(
-                                m.name,
-                                style: const TextStyle(fontSize: 13),
-                              ),
-                              subtitle: m.clientStreaming
-                                  ? const Text(
-                                      'Unsupported streaming',
-                                      style: TextStyle(fontSize: 10),
-                                    )
-                                  : m.serverStreaming
-                                  ? const Text(
-                                      'Server stream',
-                                      style: TextStyle(fontSize: 10),
-                                    )
-                                  : null,
-                              onTap: () => desk.selectMethod(m),
+                              action: () => desk.selectMethod(m),
                             ),
                       ],
                   ],
@@ -397,6 +344,52 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
       ],
     ),
   );
+  Widget _navigationRow(
+    String text, {
+    bool service = false,
+    bool expanded = false,
+    bool selected = false,
+    required VoidCallback action,
+  }) => Tooltip(
+    message: text,
+    child: InkWell(
+      onTap: action,
+      child: Ink(
+        color: selected ? const Color(0xff254438) : Colors.transparent,
+        child: SizedBox(
+          height: DeskSpace.row,
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: service ? DeskSpace.inset : DeskSpace.inset + 24,
+              right: DeskSpace.inset,
+            ),
+            child: Row(
+              children: [
+                if (service) ...[
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 16,
+                  ),
+                  const SizedBox(width: DeskSpace.gap),
+                ],
+                Expanded(
+                  child: Text(
+                    text,
+                    style: service ? DeskType.heading : DeskType.label,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   Widget requestPanel() => panel(
     Column(
       children: [
@@ -433,16 +426,22 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                   ),
                 )
               : ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(DeskSpace.panel),
                   children: [
                     SelectableText(
                       desk.method!.path,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xff55d6b0),
+                      style: DeskType.code.copyWith(
+                        color: const Color(0xff55d6b0),
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: DeskSpace.panel),
+                    if (desk.method!.clientStreaming) ...[
+                      const Text(
+                        'Client and bidirectional streaming are not supported.',
+                        style: DeskType.secondary,
+                      ),
+                      const SizedBox(height: DeskSpace.gap),
+                    ],
                     SegmentedButton<bool>(
                       segments: const [
                         ButtonSegment(
@@ -468,16 +467,13 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                         setState(() => jsonMode = value.first);
                       },
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: DeskSpace.panel),
                     if (jsonMode)
                       TextField(
                         controller: request,
                         minLines: 12,
                         maxLines: 24,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 13,
-                        ),
+                        style: DeskType.code,
                         decoration: InputDecoration(
                           labelText: 'Protobuf JSON',
                           alignLabelWithHint: true,
@@ -489,22 +485,22 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       ...formFields(),
                     const SizedBox(height: 20),
                     ExpansionTile(
+                      minTileHeight: DeskSpace.control,
+                      dense: true,
                       tilePadding: EdgeInsets.zero,
                       title: const Text(
                         'Metadata & call options',
-                        style: TextStyle(fontSize: 13),
+                        style: DeskType.label,
                       ),
                       children: [
                         MetadataEditor(
-                          key: ValueKey(
-                            '${desk.method?.path}-${desk.metadata}',
-                          ),
+                          key: ValueKey(desk.method?.path),
                           text: desk.metadata,
                           onChanged: (v) {
                             desk.metadata = v;
                           },
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: DeskSpace.inset),
                         TextField(
                           controller: timeout,
                           keyboardType: TextInputType.number,
@@ -514,7 +510,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                           onChanged: (v) =>
                               desk.timeoutMs = int.tryParse(v) ?? 5000,
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: DeskSpace.inset),
                         TextField(
                           controller: authority,
                           decoration: const InputDecoration(
@@ -522,7 +518,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                           ),
                           onChanged: (v) => desk.authority = v,
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: DeskSpace.inset),
                       ],
                     ),
                   ],
@@ -545,6 +541,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
           controller: request,
           minLines: 3,
           maxLines: 12,
+          style: DeskType.code,
           decoration: const InputDecoration(labelText: 'Protobuf JSON value'),
           onChanged: desk.setBody,
         ),
@@ -559,24 +556,19 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
         ),
       for (final f in descriptor.fields)
         Padding(
-          padding: const EdgeInsets.only(bottom: 15),
+          padding: const EdgeInsets.only(bottom: DeskSpace.inset),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Expanded(
+                  Expanded(child: Text(f.jsonName, style: DeskType.label)),
+                  Flexible(
                     child: Text(
-                      f.jsonName,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      '${f.repeated ? 'repeated ' : ''}${f.typeName.isEmpty ? typeLabel(f.type) : f.typeName.split('.').last}',
+                      style: DeskType.secondary.copyWith(color: Colors.grey),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  Text(
-                    '${f.repeated ? 'repeated ' : ''}${f.typeName.isEmpty ? typeLabel(f.type) : f.typeName.split('.').last}',
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                   IconButton(
                     tooltip: 'Unset ${f.jsonName}',
@@ -620,89 +612,106 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
     ];
   }
 
+  Widget responseControls() => Padding(
+    padding: const EdgeInsets.all(DeskSpace.inset),
+    child: LayoutBuilder(
+      builder: (context, bounds) {
+        final search = TextField(
+          controller: responseSearch,
+          decoration: InputDecoration(
+            hintText: 'Search JSON',
+            prefixIcon: const Icon(Icons.search, size: 16),
+            suffixIcon: responseSearch.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Clear JSON search',
+                    icon: const Icon(Icons.close, size: 16),
+                    onPressed: () => setState(responseSearch.clear),
+                  ),
+          ),
+          onChanged: (_) => setState(() {}),
+        );
+        final actions = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Expand all',
+              onPressed: () => responseTree.currentState?.expandAll(),
+              icon: const Icon(Icons.unfold_more, size: 16),
+            ),
+            IconButton(
+              tooltip: 'Collapse all',
+              onPressed: () => responseTree.currentState?.collapseAll(),
+              icon: const Icon(Icons.unfold_less, size: 16),
+            ),
+          ],
+        );
+        if (bounds.maxWidth < 300) {
+          return Column(
+            children: [
+              search,
+              const SizedBox(height: DeskSpace.small),
+              Align(alignment: Alignment.centerRight, child: actions),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: search),
+            actions,
+          ],
+        );
+      },
+    ),
+  );
+
   Widget responsePanel() => panel(
     Column(
       children: [
         title(
           'RESPONSE',
-          IconButton(
-            tooltip: 'Copy response JSON',
-            onPressed: () =>
-                Clipboard.setData(ClipboardData(text: desk.responseJson)),
-            icon: const Icon(Icons.copy, size: 17),
-          ),
-        ),
-        if (desk.invoking) const LinearProgressIndicator(minHeight: 2),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: TextField(
-                  controller: responseSearch,
-                  decoration: const InputDecoration(
-                    hintText: 'Search response',
-                    prefixIcon: Icon(Icons.search, size: 17),
-                    isDense: true,
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
+              IconButton(
+                tooltip: 'Response headers and trailers',
+                onPressed: () => showResponseMetadata(context, desk.result),
+                icon: const Icon(Icons.info_outline, size: 16),
               ),
               IconButton(
-                tooltip: treeMode ? 'Show JSON' : 'Show tree',
-                onPressed: () => setState(() => treeMode = !treeMode),
-                icon: Icon(
-                  treeMode ? Icons.code : Icons.account_tree_outlined,
-                  size: 18,
-                ),
+                tooltip: 'Copy response JSON',
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: desk.responseJson)),
+                icon: const Icon(Icons.copy, size: 16),
               ),
             ],
           ),
         ),
+        responseControls(),
         Expanded(
           child: desk.messages.isEmpty
               ? Center(
-                  child: Text(
-                    desk.invoking
-                        ? 'Waiting for response…'
-                        : desk.result?.error ?? 'Responses appear here',
-                    style: const TextStyle(color: Colors.grey),
+                  child: Padding(
+                    padding: const EdgeInsets.all(DeskSpace.inset),
+                    child: Text(
+                      desk.invoking
+                          ? 'Waiting for response…'
+                          : (desk.result?.error.isNotEmpty == true
+                                ? desk.result!.error
+                                : 'Responses appear here'),
+                      style: DeskType.secondary,
+                    ),
                   ),
                 )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(8),
-                  child: treeMode
-                      ? ResponseTree(
-                          value: desk.method?.serverStreaming == true
-                              ? desk.messages
-                              : desk.messages.first,
-                          filter: responseSearch.text,
-                        )
-                      : SelectableText(
-                          desk.responseJson,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                          ),
-                        ),
+              : ResponseTree(
+                  key: responseTree,
+                  value: desk.method?.serverStreaming == true
+                      ? List<Object?>.of(desk.messages)
+                      : desk.messages.first,
+                  responseId: desk.responseRevision,
+                  filter: responseSearch.text,
                 ),
         ),
-        if (desk.result != null)
-          ExpansionTile(
-            title: Text(
-              '${desk.result!.code} · ${desk.result!.durationMs} ms · ${desk.messages.length} messages',
-              style: const TextStyle(fontSize: 11),
-            ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: SelectableText(
-                  'Headers\n${pretty.convert(desk.result!.headers)}\n\nTrailers\n${pretty.convert(desk.result!.trailers)}',
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-                ),
-              ),
-            ],
-          ),
       ],
     ),
   );
@@ -781,60 +790,78 @@ class _MetadataEditorState extends State<MetadataEditor> {
     super.dispose();
   }
 
+  Widget removeHeader(int i) => IconButton(
+    tooltip: 'Remove header',
+    onPressed: () {
+      final row = rows.removeAt(i);
+      row.key.dispose();
+      row.value.dispose();
+      setState(() {});
+      send();
+    },
+    icon: const Icon(Icons.close, size: 16),
+  );
+  Widget enabledHeader(int i) => Checkbox(
+    value: rows[i].enabled,
+    onChanged: (v) {
+      setState(
+        () => rows[i] = (key: rows[i].key, value: rows[i].value, enabled: v!),
+      );
+      send();
+    },
+  );
   @override
   Widget build(BuildContext context) => Column(
     children: [
       for (var i = 0; i < rows.length; i++)
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            children: [
-              Checkbox(
-                value: rows[i].enabled,
-                onChanged: (v) {
-                  setState(
-                    () => rows[i] = (
-                      key: rows[i].key,
-                      value: rows[i].value,
-                      enabled: v!,
+          padding: const EdgeInsets.only(bottom: DeskSpace.gap),
+          child: LayoutBuilder(
+            builder: (context, bounds) {
+              final key = TextField(
+                key: ValueKey('metadata-key:$i'),
+                controller: rows[i].key,
+                decoration: const InputDecoration(hintText: 'Header key'),
+                onChanged: (_) => send(),
+              );
+              final value = TextField(
+                key: ValueKey('metadata-value:$i'),
+                controller: rows[i].value,
+                decoration: const InputDecoration(hintText: 'Value'),
+                onChanged: (_) => send(),
+              );
+              if (bounds.maxWidth < 400) {
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        enabledHeader(i),
+                        Expanded(child: key),
+                        removeHeader(i),
+                      ],
                     ),
-                  );
-                  send();
-                },
-              ),
-              Expanded(
-                child: TextField(
-                  controller: rows[i].key,
-                  decoration: const InputDecoration(
-                    hintText: 'Header key',
-                    isDense: true,
-                  ),
-                  onChanged: (_) => send(),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: TextField(
-                  controller: rows[i].value,
-                  decoration: const InputDecoration(
-                    hintText: 'Value',
-                    isDense: true,
-                  ),
-                  onChanged: (_) => send(),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Remove header',
-                onPressed: () {
-                  final row = rows.removeAt(i);
-                  row.key.dispose();
-                  row.value.dispose();
-                  setState(() {});
-                  send();
-                },
-                icon: const Icon(Icons.close, size: 16),
-              ),
-            ],
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        DeskSpace.control,
+                        DeskSpace.small,
+                        DeskSpace.control,
+                        0,
+                      ),
+                      child: value,
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  enabledHeader(i),
+                  Expanded(child: key),
+                  const SizedBox(width: DeskSpace.gap),
+                  Expanded(child: value),
+                  removeHeader(i),
+                ],
+              );
+            },
           ),
         ),
       Align(

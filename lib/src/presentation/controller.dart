@@ -22,7 +22,8 @@ class DeskController extends ChangeNotifier {
       status = 'Disconnected',
       warning = '',
       responseFilter = '';
-  int timeoutMs = 5000;
+  int timeoutMs = 5000, responseRevision = 0;
+  final callClock = Stopwatch();
   bool connected = false, connecting = false, invoking = false;
   CallResult? result;
   final messages = <Object?>[];
@@ -114,6 +115,8 @@ class DeskController extends ChangeNotifier {
     method = null;
     result = null;
     messages.clear();
+    responseRevision++;
+    callClock.stop();
     warning = '';
     status = 'Disconnected';
     emit();
@@ -127,6 +130,8 @@ class DeskController extends ChangeNotifier {
     body = '{}';
     result = null;
     messages.clear();
+    responseRevision++;
+    callClock.stop();
     status = selected.path;
     emit();
   }
@@ -169,6 +174,11 @@ class DeskController extends ChangeNotifier {
     invoking = true;
     result = null;
     messages.clear();
+    responseRevision++;
+    callClock.stop();
+    callClock
+      ..reset()
+      ..start();
     status = 'Invoking ${selected.name}…';
     emit();
     final response = await engine.invoke(
@@ -185,6 +195,7 @@ class DeskController extends ChangeNotifier {
       },
     );
     if (generation != _generation) return;
+    callClock.stop();
     result = response;
     invoking = false;
     status =
@@ -232,6 +243,8 @@ class DeskController extends ChangeNotifier {
     metadata = item['requestMetadataJson'] as String? ?? '{}';
     result = null;
     messages.clear();
+    responseRevision++;
+    callClock.stop();
     status = method == null
         ? 'Request loaded; connect to its server and select the matching method'
         : 'Loaded ${method!.path}';
@@ -249,7 +262,11 @@ class DeskController extends ChangeNotifier {
     'requestMetadataJson': metadata,
   };
   String get responseJson => pretty.convert(
-    method?.serverStreaming == true ? messages : messages.firstOrNull ?? {},
+    method?.serverStreaming == true
+        ? messages
+        : messages.isEmpty
+        ? {}
+        : messages.first,
   );
   static Map<String, String> parseMetadata(String text) {
     final value = jsonDecode(text);
@@ -262,6 +279,7 @@ class DeskController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    callClock.stop();
     ++_generation;
     engine.disconnect();
     store.close();

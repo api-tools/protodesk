@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../persistence/store.dart';
 import '../transport/engine.dart';
 import 'controller.dart';
+import 'design.dart';
 
 Future<Record?> editRecord(
   BuildContext context,
@@ -63,6 +64,9 @@ Future<Record?> editRecord(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: TextField(
                       controller: fields[key],
+                      style: key.endsWith('Json')
+                          ? DeskType.code
+                          : DeskType.body,
                       decoration: InputDecoration(labelText: key),
                       minLines: key.endsWith('Json') ? 3 : 1,
                       maxLines: key.endsWith('Json') ? 5 : 1,
@@ -70,28 +74,29 @@ Future<Record?> editRecord(
                   ),
                 if (table == 'servers') ...[
                   SwitchListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
                     contentPadding: EdgeInsets.zero,
                     title: const Text('TLS'),
                     value: tls,
                     onChanged: (v) => setState(() => tls = v),
                   ),
                   SwitchListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Server reflection'),
                     value: reflection,
                     onChanged: (v) => setState(() => reflection = v),
                   ),
-                  const Text(
-                    'Proto sources',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  const Text('Proto sources', style: DeskType.heading),
                   for (final file in [...files, ...folders])
                     Row(
                       children: [
                         Expanded(
                           child: SelectableText(
                             file,
-                            style: const TextStyle(fontSize: 12),
+                            style: DeskType.secondary,
                           ),
                         ),
                         IconButton(
@@ -341,7 +346,12 @@ Future<void> saveExample(
           mainAxisSize: MainAxisSize.min,
           children: [
             DropdownButtonFormField<String>(
+              isExpanded: true,
+              style: DeskType.body,
               initialValue: collection,
+              decoration: const InputDecoration(
+                contentPadding: DeskSpace.dropdownPadding,
+              ),
               items: [
                 for (final c in desk.collections)
                   DropdownMenuItem(
@@ -351,7 +361,7 @@ Future<void> saveExample(
               ],
               onChanged: (v) => setState(() => collection = v!),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: DeskSpace.panel),
             TextField(
               controller: name,
               decoration: const InputDecoration(labelText: 'Name'),
@@ -623,23 +633,17 @@ Future<void> previewRequest(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('REQUEST'),
-                Text(
-                  item['requestJson'] as String,
-                  style: const TextStyle(fontFamily: 'monospace'),
-                ),
-                const SizedBox(height: 16),
+                Text(item['requestJson'] as String, style: DeskType.code),
+                const SizedBox(height: DeskSpace.panel),
                 const Text('METADATA'),
                 Text(
                   item['requestMetadataJson'] as String,
-                  style: const TextStyle(fontFamily: 'monospace'),
+                  style: DeskType.code,
                 ),
                 if (history) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DeskSpace.panel),
                   Text('RESPONSE · ${item['statusCode']}'),
-                  Text(
-                    item['responseJson'] as String,
-                    style: const TextStyle(fontFamily: 'monospace'),
-                  ),
+                  Text(item['responseJson'] as String, style: DeskType.code),
                 ],
               ],
             ),

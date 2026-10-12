@@ -11,14 +11,24 @@ import 'src/schema/proto_loader.dart';
 import 'src/transport/engine.dart';
 import 'src/transport/smoke.dart';
 import 'src/presentation/controller.dart';
+import 'src/presentation/design.dart';
+export 'src/presentation/design.dart' show deskTheme;
 import 'src/presentation/workspace.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   LicenseRegistry.addLicense(() async* {
-    for (final asset in ['assets/protoc/LICENSE', 'assets/fonts/LICENSE.txt']) {
+    for (final asset in [
+      'assets/protoc/LICENSE',
+      'assets/fonts/LICENSE.txt',
+      'assets/fonts/RobotoMono-OFL.txt',
+    ]) {
       yield LicenseEntryWithLineBreaks([
-        asset.contains('fonts') ? 'Satoshi' : 'Protocol Buffers compiler',
+        asset.contains('RobotoMono')
+            ? 'Roboto Mono'
+            : asset.contains('fonts')
+            ? 'Satoshi'
+            : 'Protocol Buffers compiler',
       ], await rootBundle.loadString(asset));
     }
   });
@@ -101,27 +111,6 @@ Future<void> main() async {
     );
   }
 }
-
-final deskTheme = ThemeData(
-  useMaterial3: true,
-  fontFamily: 'Satoshi',
-  brightness: Brightness.dark,
-  scaffoldBackgroundColor: const Color(0xff242e39),
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: const Color(0xff55d6b0),
-    brightness: Brightness.dark,
-    surface: const Color(0xff171e26),
-  ),
-  inputDecorationTheme: InputDecorationTheme(
-    filled: true,
-    fillColor: const Color(0xff111820),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(6),
-      borderSide: const BorderSide(color: Color(0xff344048)),
-    ),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-  ),
-);
 
 class ProtoDeskApp extends StatefulWidget {
   final DeskController desk;

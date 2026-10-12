@@ -2,6 +2,7 @@
 
 ProtoDesk application code is licensed under MIT. Bundled dependencies retain their own licenses.
 
+- Roboto Mono: Google/Christian Robertson, SIL Open Font License 1.1. Bundled from google/fonts, full terms in `assets/fonts/RobotoMono-OFL.txt`. Used consistently for JSON/code.
 - Satoshi by Deni Anggara, Indian Type Foundry: ITF Free Font License. Downloaded from the official Fontshare API. Flutter-compatible TTF weights Light, Regular, Medium, and Bold are bundled as UI assets. Full terms: `assets/fonts/LICENSE.txt`. Do not redistribute the font files separately from the application.
 - Protocol Buffers compiler and standard schemas: Google, BSD 3-Clause; full terms in `assets/protoc/LICENSE`. Official version 36.2 platform bundles from https://github.com/protocolbuffers/protobuf/releases/tag/v36.2. Used only to compile validated local proto schemas into descriptor sets.
 - Dart HTTP/2: BSD-3-Clause, https://github.com/dart-lang/http. Version 3.1.0 supplies the cancellation handling fix; its transport API is verified with Dart gRPC in the automated suite.

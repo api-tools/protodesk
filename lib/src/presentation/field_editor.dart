@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../schema/schema.dart';
 import '../schema/codec.dart';
 import 'controller.dart';
+import 'design.dart';
 
 /// Local text drafts keep focus and invalid edits without corrupting the request.
 class FieldEditor extends StatefulWidget {
@@ -106,7 +107,10 @@ class _FieldEditorState extends State<FieldEditor> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(padding: const EdgeInsets.all(12), child: Text('$i')),
+                  Padding(
+                    padding: const EdgeInsets.all(DeskSpace.inset),
+                    child: Text('$i'),
+                  ),
                   Expanded(
                     child: editor(field.item, values[i], (v) {
                       values[i] = v;
@@ -161,7 +165,10 @@ class _FieldEditorState extends State<FieldEditor> {
         children: [
           Row(
             children: [
-              const Text('Form', style: TextStyle(color: Colors.tealAccent)),
+              Text(
+                'Form',
+                style: DeskType.label.copyWith(color: Colors.tealAccent),
+              ),
               TextButton(
                 onPressed: () {
                   setState(() {
@@ -187,18 +194,31 @@ class _FieldEditorState extends State<FieldEditor> {
               children: [
                 for (final f in message.fields)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: DeskSpace.small,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          '${f.jsonName} · ${f.typeName.isEmpty ? typeLabel(f.type) : f.typeName}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey,
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(f.jsonName, style: DeskType.label),
+                            ),
+                            Flexible(
+                              child: Text(
+                                f.typeName.isEmpty
+                                    ? typeLabel(f.type)
+                                    : f.typeName.split('.').last,
+                                style: DeskType.secondary.copyWith(
+                                  color: Colors.grey,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 5),
+                        const SizedBox(height: DeskSpace.small),
                         FieldEditor(
                           key: ValueKey(f.name),
                           field: f,
@@ -249,13 +269,22 @@ class _FieldEditorState extends State<FieldEditor> {
           widget.schema.enums[field.typeName]?.values.toSet().toList() ??
           [];
       return DropdownButtonFormField<String>(
+        isExpanded: true,
+        style: DeskType.body,
         initialValue: values.contains(widget.value)
             ? widget.value as String
             : null,
-        decoration: const InputDecoration(labelText: 'Enum'),
+        decoration: const InputDecoration(
+          labelText: 'Enum',
+          contentPadding: DeskSpace.dropdownPadding,
+        ),
         items: [
           const DropdownMenuItem(value: '', child: Text('Unset')),
-          for (final v in values) DropdownMenuItem(value: v, child: Text(v)),
+          for (final v in values)
+            DropdownMenuItem(
+              value: v,
+              child: Text(v, overflow: TextOverflow.ellipsis),
+            ),
         ],
         onChanged: (v) => update(v == '' ? null : v),
       );
@@ -281,7 +310,7 @@ class _FieldEditorState extends State<FieldEditor> {
         TextField(
           controller: text,
           maxLines: json ? 4 : 1,
-          style: TextStyle(fontFamily: json ? 'monospace' : null, fontSize: 13),
+          style: json ? DeskType.code : DeskType.body,
           decoration: InputDecoration(
             isDense: true,
             errorText: error,

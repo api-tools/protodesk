@@ -6,7 +6,9 @@ Choose a server → browse services and methods → edit a request → invoke �
 
 ## Features
 
-- Resizable three-pane dark workspace, service/method filtering, Satoshi typography, selectable JSON and searchable response trees.
+- Resizable three-pane dark workspace, service/method filtering, shared Satoshi typography, compact 36 px controls, and Roboto Mono JSON/code. Service and method rows use consistent spacing.
+- Searchable, collapsible JSON responses with quoted keys/values, expand/collapse all, full JSON copy, highlighted matches and ancestor context. Clearing search restores expansion; each call starts with fresh expansion state.
+- gRPC status, duration, message count and live stream state in the footer. Response headers/trailers open in a compact secondary dialog with copy and empty states; request metadata stays editable.
 - Plaintext or verified TLS connections, reflection v1/v1alpha, request headers, deadlines, and optional authority overrides.
 - Reflection-first API discovery with local `.proto` fallback. Native file/folder selection, standard imports, source validation, and persistent file access on macOS.
 - Runtime protobuf descriptors and JSON encoding: user APIs do not need generated application classes. Supports scalar types, 64-bit string integers, bytes, enums, maps, repeated/nested/recursive messages, oneofs, presence, and well-known JSON types.
