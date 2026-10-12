@@ -34,7 +34,7 @@ class DistributionTests(unittest.TestCase):
             app = self.fixture(root)
             commands = []
             def run(args, **kwargs):
-                commands.append([str(a) for a in args])
+                commands.append([str(a).replace('\\', '/') for a in args])
                 return subprocess.CompletedProcess(args, 0, stdout='shared library', stderr='')
             with patch.object(package, 'run', side_effect=run):
                 items, leaves = package.sign(app, 'CERT', distribution=True)
@@ -66,7 +66,7 @@ class DistributionTests(unittest.TestCase):
             app = self.fixture(root)
             commands = []
             def run(args, **kwargs):
-                commands.append([str(a) for a in args])
+                commands.append([str(a).replace('\\', '/') for a in args])
                 if args[:3] == ['xcrun','notarytool','submit']:
                     return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'id':'submission-id','status':'Accepted'}), stderr='')
                 if args[:3] == ['xcrun','notarytool','log']:
@@ -90,7 +90,7 @@ class DistributionTests(unittest.TestCase):
             app = self.fixture(root)
             commands = []
             def run(args, **kwargs):
-                commands.append([str(a) for a in args])
+                commands.append([str(a).replace('\\', '/') for a in args])
                 if args[:3] == ['xcrun','notarytool','submit']:
                     return subprocess.CompletedProcess(args, 0, stdout=json.dumps({'id':'rejected','status':'Invalid'}), stderr='')
                 if args[:3] == ['xcrun','notarytool','log']:
