@@ -547,13 +547,14 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
         if (desk.method != null)
           Container(
             key: const ValueKey('request-mode-bar'),
+            height: DeskSpace.modeFooter,
             width: double.infinity,
-            padding: const EdgeInsets.all(DeskSpace.gap),
+            padding: const EdgeInsets.symmetric(horizontal: DeskSpace.gap),
             decoration: const BoxDecoration(
               border: Border(top: BorderSide(color: Color(0xff303b47))),
             ),
             child: Align(
-              alignment: Alignment.centerLeft,
+              alignment: Alignment.centerRight,
               child: DeskModeSwitch(
                 json: jsonMode,
                 onChanged: (value) {

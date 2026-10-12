@@ -46,6 +46,7 @@ abstract final class DeskSpace {
       inset = 12.0,
       panel = 16.0,
       minimumPane = 240.0;
+  static const modeFooter = 37.0; // 36 px hit targets plus the 1 px top border.
   static const control = 36.0,
       row = 36.0,
       header = 48.0,
@@ -226,8 +227,7 @@ class _DeskDropdownState<T> extends State<DeskDropdown<T>> {
   );
 }
 
-/// Two equal-width mode buttons share the exact metrics of Invoke and Connect.
-/// SegmentedButton hard-codes a 40 px minimum independently of ButtonStyle.
+/// Compact icon modes retain full desktop hit targets and keyboard focus.
 class DeskModeSwitch extends StatelessWidget {
   final bool json;
   final ValueChanged<bool> onChanged;
@@ -237,46 +237,37 @@ class DeskModeSwitch extends StatelessWidget {
     required this.onChanged,
   });
   @override
-  Widget build(BuildContext context) {
-    var labelWidth = 0.0;
-    for (final label in ['Form', 'JSON']) {
-      final text = TextPainter(
-        text: TextSpan(text: label, style: DeskType.label),
-        textDirection: Directionality.of(context),
-        textScaler: MediaQuery.textScalerOf(context),
-      )..layout();
-      if (text.width > labelWidth) labelWidth = text.width;
-      text.dispose();
-    }
-    final contentWidth = labelWidth + 16 + DeskSpace.gap;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final mode in [false, true])
-          Semantics(
-            selected: json == mode,
-            child: json == mode
-                ? FilledButton(
-                    onPressed: () => onChanged(mode),
-                    child: _label(mode, contentWidth),
-                  )
-                : OutlinedButton(
-                    onPressed: () => onChanged(mode),
-                    child: _label(mode, contentWidth),
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      for (final mode in [false, true])
+        Semantics(
+          selected: json == mode,
+          child: Stack(
+            children: [
+              IconButton(
+                tooltip: mode ? 'JSON' : 'Form',
+                onPressed: () => onChanged(mode),
+                icon: Icon(
+                  mode ? Icons.code : Icons.list_alt,
+                  size: 18,
+                  color: json == mode
+                      ? const Color(0xff55d6b0)
+                      : const Color(0xffe0e9f0),
+                ),
+              ),
+              if (json == mode)
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 2,
+                  child: IgnorePointer(
+                    child: Container(height: 2, color: const Color(0xff55d6b0)),
                   ),
+                ),
+            ],
           ),
-      ],
-    );
-  }
-
-  Widget _label(bool mode, double width) => SizedBox(
-    width: width,
-    child: Row(
-      children: [
-        Icon(mode ? Icons.code : Icons.list_alt, size: 16),
-        const SizedBox(width: DeskSpace.gap),
-        Text(mode ? 'JSON' : 'Form'),
-      ],
-    ),
+        ),
+    ],
   );
 }

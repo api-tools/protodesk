@@ -153,7 +153,7 @@ void main() {
       await tester.pump();
       expect(desk.body, contains('Ada'));
       await tester.tap(
-        find.descendant(of: footer, matching: find.text('JSON')),
+        find.descendant(of: footer, matching: find.byTooltip('JSON')),
       );
       await tester.pumpAndSettle();
       expect(find.textContaining('Protobuf JSON'), findsOneWidget);
@@ -162,7 +162,7 @@ void main() {
       );
       await tester.enterText(jsonEditor, '{invalid');
       await tester.tap(
-        find.descendant(of: footer, matching: find.text('Form')),
+        find.descendant(of: footer, matching: find.byTooltip('Form')),
       );
       await tester.pump();
       expect(jsonEditor, findsOneWidget);
@@ -173,7 +173,7 @@ void main() {
       );
       await tester.pump();
       await tester.tap(
-        find.descendant(of: footer, matching: find.text('Form')),
+        find.descendant(of: footer, matching: find.byTooltip('Form')),
       );
       await tester.pumpAndSettle();
       expect(desk.body, contains('Ada'));
@@ -233,16 +233,26 @@ void main() {
         for (final box in [filter, server, jsonSearch, scalar, enumInput]) {
           expect(box.height, closeTo(DeskSpace.control, .01));
         }
-        for (final label in ['Form', 'JSON', 'Invoke', 'Disconnect']) {
+        for (final label in ['Invoke', 'Disconnect']) {
           expect(
             buttonBounds(label).height,
             closeTo(DeskSpace.control, .01),
             reason: label,
           );
         }
+        final modes = ['Form', 'JSON']
+            .map(
+              (label) =>
+                  find.descendant(of: footer, matching: find.byTooltip(label)),
+            )
+            .toList();
+        for (final mode in modes) {
+          expect(tester.getSize(mode), const Size.square(DeskSpace.control));
+        }
+        expect(tester.getSize(footer).height, DeskSpace.modeFooter);
         expect(
-          buttonBounds('Form').width,
-          closeTo(buttonBounds('JSON').width, .01),
+          tester.getBottomRight(modes.last).dx,
+          closeTo(tester.getBottomRight(footer).dx - DeskSpace.gap, .01),
         );
         expect(server.top, closeTo(buttonBounds('Disconnect').top, .01));
         expect(
@@ -287,12 +297,12 @@ void main() {
       await tester.enterText(numberInput, '42');
       await tester.pumpAndSettle();
       await tester.tap(
-        find.descendant(of: footer, matching: find.text('JSON')),
+        find.descendant(of: footer, matching: find.byTooltip('JSON')),
       );
       await tester.pumpAndSettle();
       await screenshot('json');
       await tester.tap(
-        find.descendant(of: footer, matching: find.text('Form')),
+        find.descendant(of: footer, matching: find.byTooltip('Form')),
       );
       await tester.pumpAndSettle();
       final requestViewport = find
