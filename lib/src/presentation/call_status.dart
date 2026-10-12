@@ -46,7 +46,11 @@ class _CallStatusBarState extends State<CallStatusBar> {
         ? ''
         : '${result.code} · ${result.durationMs} ms';
     final status = desk.invoking
-        ? '${desk.method?.serverStreaming == true ? 'Live stream' : 'Calling'} · ${desk.callClock.elapsedMilliseconds} ms · $count'
+        ? '${desk.method?.clientStreaming == true
+              ? 'Client stream · ${desk.sentRequests.length} sent · ${desk.sendingFinished ? 'send closed' : 'send open'}'
+              : desk.method?.serverStreaming == true
+              ? 'Live stream'
+              : 'Calling'} · ${desk.callClock.elapsedMilliseconds} ms · $count'
         : result != null
         ? desk.status.startsWith(prefix)
               ? desk.status.replaceFirst(prefix, '$prefix · $count')

@@ -60,6 +60,22 @@ Future<void> releaseSmoke(
     if (stream.code != 'OK' || received != 3) {
       throw StateError('Release streaming failed');
     }
+    final uploadMethod = discovery.schema.methods.values.firstWhere(
+      (m) => m.clientStreaming && !m.serverStreaming,
+    );
+    final upload = engine.startClientStream(
+      uploadMethod,
+      metadata: {'x-test': 'release-upload'},
+    );
+    upload.send({'text': 'first'});
+    upload.send({'text': 'second'});
+    upload.finishSending();
+    final uploaded = await upload.result;
+    if (uploaded.code != 'OK' ||
+        (uploaded.messages.single as Map)['text'] != 'first|second' ||
+        uploaded.headers['echo-header'] != 'release-upload') {
+      throw StateError('Release client streaming failed');
+    }
     final database = '${databaseRoot.path}/release-check.sqlite';
     var store = WorkspaceStore.open(database);
     final saved = store.save('servers', {
@@ -73,8 +89,9 @@ Future<void> releaseSmoke(
       'name': 'Runtime request',
       'collectionId': collection['id'],
       'serverId': saved['id'],
-      'fullMethod': unary.path,
-      'requestJson': '{"text":"compiled desktop"}',
+      'fullMethod': uploadMethod.path,
+      'requestJson': '{"text":"second"}',
+      'requestStreamJson': '[{"text":"first"},{"text":"second"}]',
       'requestMetadataJson': '{}',
     });
     store.save('history_items', {
@@ -91,7 +108,16 @@ Future<void> releaseSmoke(
       if (store.list('servers').length != 2 ||
           store.list('collection_requests').length != 2 ||
           store.list('history_items').length != 1 ||
-          !store.list('servers').any((s) => s['id'] == saved['id'])) {
+          !store.list('servers').any((s) => s['id'] == saved['id']) ||
+          store
+              .list('collection_requests')
+              .any(
+                (r) =>
+                    (jsonDecode(
+                      r['requestStreamJson'] as String,
+                    ) as List).length !=
+                    2,
+              )) {
         throw StateError('Compiled persistence/transfer check failed');
       }
     } finally {
@@ -103,6 +129,7 @@ Future<void> releaseSmoke(
         'discovery': discovery.source,
         'unary': result.code,
         'streamMessages': received,
+        'clientStream': uploaded.code,
         'persistence': 'PASS',
         'nativeDataPath': nativeDataPath == null ? 'not applicable' : 'PASS',
       }),

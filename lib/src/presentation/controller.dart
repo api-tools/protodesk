@@ -27,6 +27,12 @@ class DeskController extends ChangeNotifier {
   bool connected = false, connecting = false, invoking = false;
   CallResult? result;
   final messages = <Object?>[];
+  final queuedRequests = <Object?>[];
+  List<Object?> sentRequests = [];
+  RequestStreamCall? requestStream;
+  bool get sendingFinished => requestStream?.inputClosed ?? true;
+  bool get canSend => invoking && requestStream != null && !sendingFinished;
+
   int _generation = 0;
   bool _disposed = false;
   DeskController(this.store, this.engine) {
@@ -113,6 +119,9 @@ class DeskController extends ChangeNotifier {
     invoking = false;
     schema = SchemaRegistry();
     method = null;
+    requestStream = null;
+    queuedRequests.clear();
+    sentRequests = [];
     result = null;
     messages.clear();
     responseRevision++;
@@ -127,6 +136,9 @@ class DeskController extends ChangeNotifier {
     engine.cancel();
     invoking = false;
     method = selected;
+    requestStream = null;
+    queuedRequests.clear();
+    sentRequests = [];
     body = '{}';
     result = null;
     messages.clear();
@@ -151,6 +163,78 @@ class DeskController extends ChangeNotifier {
     emit();
   }
 
+  String? validateQueue(List<Object?> values) {
+    try {
+      if (values.length > RequestStreamLimits.queuedMessages) {
+        throw const FormatException('Queue is limited to 64 messages');
+      }
+      var wire = 0, json = 0;
+      for (final value in values) {
+        wire += ProtoCodec(schema).encode(method!.input, value).length;
+        json += utf8.encode(jsonEncode(value)).length;
+      }
+      if (wire > RequestStreamLimits.queuedBytes ||
+          json > RequestStreamLimits.jsonBytes) {
+        throw const FormatException('Queue exceeds 32 MiB wire or 64 MiB JSON');
+      }
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  void queueDraft() {
+    if (method?.clientStreaming != true || invoking) return;
+    final error = validateBody(body);
+    if (error != null) {
+      status = error;
+      emit();
+      return;
+    }
+    final value = jsonDecode(body);
+    final invalid = validateQueue([...queuedRequests, value]);
+    if (invalid != null) {
+      status = invalid;
+      emit();
+      return;
+    }
+    queuedRequests.add(value);
+    status = '${queuedRequests.length} messages queued';
+    emit();
+  }
+
+  void removeQueuedRequest(int index) {
+    if (invoking) return;
+    queuedRequests.removeAt(index);
+    emit();
+  }
+
+  void sendDraft() {
+    if (!canSend) return;
+    final error = validateBody(body);
+    if (error != null) {
+      status = error;
+      emit();
+      return;
+    }
+    try {
+      final value = jsonDecode(body);
+      requestStream!.send(value);
+      sentRequests.add(value);
+      status = '${sentRequests.length} messages sent';
+    } catch (e) {
+      status = e.toString();
+    }
+    emit();
+  }
+
+  void finishSending() {
+    if (!canSend) return;
+    requestStream!.finishSending();
+    status = 'Send side finished; waiting for response';
+    emit();
+  }
+
   Future<void> invoke() async {
     if (!connected || method == null || invoking) return;
     final error = validateBody(body);
@@ -158,6 +242,19 @@ class DeskController extends ChangeNotifier {
       status = error;
       emit();
       return;
+    }
+    if (method!.clientStreaming) {
+      if (method!.serverStreaming) {
+        status = 'Bidirectional streaming is pending the next increment';
+        emit();
+        return;
+      }
+      final invalid = validateQueue(queuedRequests);
+      if (invalid != null) {
+        status = invalid;
+        emit();
+        return;
+      }
     }
     final generation = ++_generation;
     final selected = method!;
@@ -181,19 +278,54 @@ class DeskController extends ChangeNotifier {
       ..start();
     status = 'Invoking ${selected.name}…';
     emit();
-    final response = await engine.invoke(
-      selected,
-      jsonDecode(request),
-      metadata: headers,
-      timeoutMs: timeoutMs,
-      authority: authority,
-      onMessage: (message) {
-        if (generation == _generation) {
-          messages.add(message);
-          emit();
+    final outgoing = <Object?>[];
+    if (selected.clientStreaming) sentRequests = outgoing;
+    void onMessage(Object? message) {
+      if (generation == _generation) {
+        messages.add(message);
+        emit();
+      }
+    }
+
+    CallResult response;
+    try {
+      if (selected.clientStreaming) {
+        requestStream = engine.startClientStream(
+          selected,
+          metadata: headers,
+          timeoutMs: timeoutMs,
+          authority: authority,
+          onMessage: onMessage,
+        );
+        for (final value in queuedRequests) {
+          requestStream!.send(value);
+          outgoing.add(value);
         }
-      },
-    );
+        queuedRequests.clear();
+        status = 'Client stream open; ${outgoing.length} messages sent';
+        emit();
+        response = await requestStream!.result;
+      } else {
+        response = await engine.invoke(
+          selected,
+          jsonDecode(request),
+          metadata: headers,
+          timeoutMs: timeoutMs,
+          authority: authority,
+          onMessage: onMessage,
+        );
+      }
+    } catch (e) {
+      await engine.cancel();
+      response = CallResult(
+        List.of(messages),
+        'FAILED_PRECONDITION',
+        e.toString(),
+        callClock.elapsedMilliseconds,
+        {},
+        {},
+      );
+    }
     if (generation != _generation) return;
     callClock.stop();
     result = response;
@@ -209,6 +341,7 @@ class DeskController extends ChangeNotifier {
         'methodName': selected.name,
         'fullMethod': selected.path,
         'requestJson': request,
+        'requestStreamJson': jsonEncode(outgoing),
         'requestMetadataJson': jsonEncode({
           ...parseMetadata(selectedServer['metadataJson'] as String? ?? '{}'),
           ...headers,
@@ -239,6 +372,11 @@ class DeskController extends ChangeNotifier {
     engine.cancel();
     invoking = false;
     method = schema.methods[item['fullMethod']];
+    requestStream = null;
+    sentRequests = [];
+    queuedRequests.clear();
+    final queue = jsonDecode(item['requestStreamJson'] as String? ?? '[]');
+    if (queue is List) queuedRequests.addAll(queue);
     body = item['requestJson'] as String? ?? '{}';
     metadata = item['requestMetadataJson'] as String? ?? '{}';
     result = null;
@@ -259,6 +397,9 @@ class DeskController extends ChangeNotifier {
     'methodName': method?.name ?? '',
     'fullMethod': method?.path ?? '',
     'requestJson': body,
+    'requestStreamJson': jsonEncode(
+      queuedRequests.isNotEmpty ? queuedRequests : sentRequests,
+    ),
     'requestMetadataJson': metadata,
   };
   String get responseJson => pretty.convert(

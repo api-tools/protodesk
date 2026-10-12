@@ -30,6 +30,16 @@ class FixtureService extends Service {
         (v) => v,
       ),
     );
+    $addMethod(
+      ServiceMethod<List<int>, List<int>>(
+        'Upload',
+        upload,
+        true,
+        false,
+        (v) => v,
+        (v) => v,
+      ),
+    );
   }
   @override
   String get $name => 'runtime.fixture.Echo';
@@ -49,6 +59,29 @@ class FixtureService extends Service {
     });
     call.trailers!.addAll({'echo-trailer': 'complete'});
     return bytes;
+  }
+
+  Future<List<int>> upload(ServiceCall call, Stream<List<int>> requests) async {
+    call.headers!.addAll({
+      'echo-header': call.clientMetadata?['x-test'] ?? 'upload',
+    });
+    call.sendHeaders();
+    final texts = <String>[];
+    await for (final bytes in requests) {
+      final body = codec.decode('runtime.fixture.Payload', bytes) as Map;
+      if (body['text'] == 'error') {
+        throw const GrpcError.permissionDenied('Upload refused request');
+      }
+      if (body['text'] == 'slow') {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+      texts.add(body['text'] as String? ?? '');
+    }
+    call.trailers!.addAll({'echo-trailer': 'upload-complete'});
+    return codec.encode('runtime.fixture.Payload', {
+      'text': texts.isEmpty ? 'upload 0' : texts.join('|'),
+      'signed': texts.length.toString(),
+    });
   }
 
   Stream<List<int>> watch(ServiceCall call, Future<List<int>> request) async* {

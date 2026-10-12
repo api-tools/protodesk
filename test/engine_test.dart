@@ -178,7 +178,7 @@ void main() {
             result.schema.methods['/runtime.fixture.Echo/Upload']!,
             {},
           )).code,
-          'UNIMPLEMENTED',
+          'OK',
         );
       } finally {
         await fixture.waitForIdle();
