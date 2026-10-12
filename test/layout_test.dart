@@ -13,6 +13,7 @@ import 'package:protodesk/src/schema/proto_loader.dart';
 import 'package:protodesk/src/transport/engine.dart';
 import 'package:protodesk/src/presentation/design.dart';
 import 'package:protodesk/src/presentation/workspace.dart';
+import 'package:protodesk/src/presentation/field_editor.dart';
 
 void main() {
   testWidgets(
@@ -40,6 +41,7 @@ void main() {
       final schema = SchemaRegistry();
       schema.messages['example.Request'] = ProtoMessage('example.Request', [
         const ProtoField(name: 'name', jsonName: 'name', number: 1, type: 9),
+        const ProtoField(name: 'count', jsonName: 'count', number: 7, type: 5),
         const ProtoField(
           name: 'enabled',
           jsonName: 'enabled',
@@ -99,7 +101,7 @@ void main() {
       desk.server = desk.servers.first;
       desk.connected = true;
       desk.method = method;
-      desk.body = '{"name":"Populated nested request", "enabled":true, "labels":["desktop", "compact"], "nested":{"value":"Nested text remains editable"}, "mode":"MODE_ACTIVE", "children":[{"value":"Repeated child"}]}';
+      desk.body = '{"name":"Populated nested request", "count":42, "enabled":true, "labels":["desktop", "compact"], "nested":{"value":"Nested text remains editable"}, "mode":"MODE_ACTIVE", "children":[{"value":"Repeated child"}]}';
       desk.metadata = '{"x-request-context":"desktop-review", "authorization":"Bearer test-only-token"}';
       desk.messages.add({
         'greeting': 'Hello, ProtoDesk',
@@ -167,7 +169,7 @@ void main() {
       expect(desk.body, '{invalid');
       await tester.enterText(
         jsonEditor,
-        '{"name":"Ada","mode":"MODE_ACTIVE","nested":{"value":"Nested text remains editable"},"children":[{"value":"Repeated child"}],"labels":["desktop","compact"]}',
+        '{"name":"Ada","count":42,"mode":"MODE_ACTIVE","nested":{"value":"Nested text remains editable"},"children":[{"value":"Repeated child"}],"labels":["desktop","compact"]}',
       );
       await tester.pump();
       await tester.tap(
@@ -197,13 +199,93 @@ void main() {
           .ancestor(of: find.text(method.name), matching: find.byType(SizedBox))
           .first;
       expect(tester.getSize(navRow).height, DeskSpace.row);
-      expect(
-        tester.getSize(find.byType(TextField).at(1)).height,
-        closeTo(DeskSpace.control, 2),
-      );
+      Rect inputBounds(Finder input) {
+        final child = find
+            .descendant(
+              of: input,
+              matching: find.byWidgetPredicate(
+                (w) => w is EditableText || w is DropdownButton<String>,
+              ),
+            )
+            .first;
+        final box = InputDecorator.containerOf(tester.element(child))!;
+        return box.localToGlobal(Offset.zero) & box.size;
+      }
+
+      Rect buttonBounds(String label) {
+        final button = find
+            .ancestor(
+              of: find.text(label).last,
+              matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+            )
+            .first;
+        return tester.getRect(
+          find.descendant(of: button, matching: find.byType(Material)).first,
+        );
+      }
+
+      void checkDimensions() {
+        final filter = inputBounds(find.byType(TextField).first);
+        final server = inputBounds(find.byType(DeskDropdown<String>).first);
+        final jsonSearch = inputBounds(find.byType(TextField).last);
+        final scalar = inputBounds(find.byType(TextField).at(1));
+        final enumInput = inputBounds(find.byType(DeskDropdown<String>).last);
+        for (final box in [filter, server, jsonSearch, scalar, enumInput]) {
+          expect(box.height, closeTo(DeskSpace.control, .01));
+        }
+        for (final label in ['Form', 'JSON', 'Invoke', 'Disconnect']) {
+          expect(
+            buttonBounds(label).height,
+            closeTo(DeskSpace.control, .01),
+            reason: label,
+          );
+        }
+        expect(
+          buttonBounds('Form').width,
+          closeTo(buttonBounds('JSON').width, .01),
+        );
+        expect(server.top, closeTo(buttonBounds('Disconnect').top, .01));
+        expect(
+          server.center.dy,
+          closeTo(buttonBounds('Disconnect').center.dy, .01),
+        );
+        for (final field in find.byType(FieldEditor).evaluate()) {
+          final inputs = find.descendant(
+            of: find.byWidget(field.widget),
+            matching: find.byType(TextField),
+          );
+          for (final element in inputs.evaluate()) {
+            if ((element.widget as TextField).maxLines == 1) {
+              expect(
+                inputBounds(find.byWidget(element.widget)).height,
+                closeTo(filter.height, .01),
+              );
+            }
+          }
+        }
+      }
+
+      checkDimensions();
       await tester.tap(find.byTooltip('Expand all'));
       await tester.pump();
       await screenshot('');
+      final numberInput = find.descendant(
+        of: find.byWidgetPredicate(
+          (w) => w is FieldEditor && w.field.name == 'count',
+        ),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(numberInput, 'invalid integer');
+      await tester.pumpAndSettle();
+      expect(inputBounds(numberInput).height, closeTo(DeskSpace.control, .01));
+      expect(
+        tester.getSize(numberInput).height,
+        greaterThan(DeskSpace.control),
+      );
+      expect(tester.takeException(), isNull);
+      await screenshot('validation');
+      await tester.enterText(numberInput, '42');
+      await tester.pumpAndSettle();
       await tester.tap(
         find.descendant(of: footer, matching: find.text('JSON')),
       );
@@ -229,6 +311,7 @@ void main() {
       tester.view.physicalSize = const Size(1000, 650);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      checkDimensions();
       await screenshot('small');
       await tester.enterText(find.byType(TextField).last, 'needle');
       await tester.pumpAndSettle();
@@ -271,6 +354,16 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('x-request-context'), findsOneWidget);
+      for (final element in find.byType(TextField).evaluate()) {
+        final field = element.widget as TextField;
+        if (field.maxLines == 1) {
+          expect(
+            inputBounds(find.byWidget(field)).height,
+            closeTo(DeskSpace.control, .01),
+            reason: field.decoration?.labelText ?? field.decoration?.hintText,
+          );
+        }
+      }
       expect(tester.takeException(), isNull);
       expect(tester.getTopLeft(footer).dy, greaterThan(0));
       expect(tester.getTopLeft(footer).dy, lessThan(650));
@@ -308,5 +401,6 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       dir.deleteSync(recursive: true);
     },
+    variant: TargetPlatformVariant({TargetPlatform.macOS}),
   );
 }

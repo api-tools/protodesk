@@ -53,11 +53,7 @@ abstract final class DeskSpace {
       indent = 16.0;
   static const fieldPadding = EdgeInsets.symmetric(
     horizontal: inset,
-    vertical: gap,
-  );
-  static const dropdownPadding = EdgeInsets.symmetric(
-    horizontal: inset,
-    vertical: 6,
+    vertical: 9,
   );
 }
 
@@ -90,6 +86,7 @@ final deskTheme = ThemeData(
   ),
   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
   inputDecorationTheme: InputDecorationThemeData(
+    visualDensity: VisualDensity.standard,
     isDense: true,
     filled: true,
     fillColor: const Color(0xff111820),
@@ -109,6 +106,7 @@ final deskTheme = ThemeData(
       minHeight: DeskSpace.control,
     ),
     border: OutlineInputBorder(
+      gapPadding: 0,
       borderRadius: BorderRadius.circular(4),
       borderSide: const BorderSide(color: Color(0xff344048)),
     ),
@@ -117,9 +115,6 @@ final deskTheme = ThemeData(
   filledButtonTheme: FilledButtonThemeData(style: _buttonStyle),
   textButtonTheme: TextButtonThemeData(style: _buttonStyle),
   outlinedButtonTheme: OutlinedButtonThemeData(style: _buttonStyle),
-  segmentedButtonTheme: SegmentedButtonThemeData(
-    style: _buttonStyle.copyWith(visualDensity: VisualDensity.compact),
-  ),
   iconButtonTheme: IconButtonThemeData(
     style: ButtonStyle(
       minimumSize: const WidgetStatePropertyAll(Size.square(DeskSpace.control)),
@@ -160,6 +155,8 @@ final deskTheme = ThemeData(
 final _buttonStyle = ButtonStyle(
   textStyle: const WidgetStatePropertyAll(DeskType.label),
   minimumSize: const WidgetStatePropertyAll(Size(0, DeskSpace.control)),
+  fixedSize: const WidgetStatePropertyAll(Size.fromHeight(DeskSpace.control)),
+  visualDensity: VisualDensity.standard,
   padding: const WidgetStatePropertyAll(
     EdgeInsets.symmetric(horizontal: DeskSpace.inset),
   ),
@@ -168,3 +165,118 @@ final _buttonStyle = ButtonStyle(
     RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
   ),
 );
+
+/// Material dropdowns reserve 24 px internally even when their text is 18 px.
+/// Bound the full hit target to the control height and pad its content inside.
+/// Focus remains on DropdownButton, including keyboard menu navigation.
+class DeskDropdown<T> extends StatefulWidget {
+  final T? value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final InputDecoration decoration;
+  const DeskDropdown({
+    super.key,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.decoration = const InputDecoration(),
+  });
+  @override
+  State<DeskDropdown<T>> createState() => _DeskDropdownState<T>();
+}
+
+class _DeskDropdownState<T> extends State<DeskDropdown<T>> {
+  bool focused = false, hovering = false;
+  @override
+  Widget build(BuildContext context) => Focus(
+    canRequestFocus: false,
+    onFocusChange: (value) => setState(() => focused = value),
+    child: MouseRegion(
+      onEnter: (_) => setState(() => hovering = true),
+      onExit: (_) => setState(() => hovering = false),
+      child: InputDecorator(
+        decoration: widget.decoration.copyWith(
+          enabled: widget.onChanged != null,
+          // Padding lives inside the dropdown's InkWell so the whole border
+          // remains clickable. Effective content padding matches TextField.
+          contentPadding: EdgeInsets.zero,
+          hintText: '',
+        ),
+        isFocused: focused,
+        isHovering: hovering,
+        isEmpty: widget.value == null,
+        child: SizedBox(
+          height: DeskSpace.control,
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<T>(
+              value: widget.value,
+              padding: DeskSpace.fieldPadding,
+              hint: Text(widget.decoration.hintText ?? ''),
+              isExpanded: true,
+              isDense: true,
+              iconSize: 18,
+              style: DeskType.body,
+              items: widget.items,
+              onChanged: widget.onChanged,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Two equal-width mode buttons share the exact metrics of Invoke and Connect.
+/// SegmentedButton hard-codes a 40 px minimum independently of ButtonStyle.
+class DeskModeSwitch extends StatelessWidget {
+  final bool json;
+  final ValueChanged<bool> onChanged;
+  const DeskModeSwitch({
+    super.key,
+    required this.json,
+    required this.onChanged,
+  });
+  @override
+  Widget build(BuildContext context) {
+    var labelWidth = 0.0;
+    for (final label in ['Form', 'JSON']) {
+      final text = TextPainter(
+        text: TextSpan(text: label, style: DeskType.label),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      if (text.width > labelWidth) labelWidth = text.width;
+      text.dispose();
+    }
+    final contentWidth = labelWidth + 16 + DeskSpace.gap;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final mode in [false, true])
+          Semantics(
+            selected: json == mode,
+            child: json == mode
+                ? FilledButton(
+                    onPressed: () => onChanged(mode),
+                    child: _label(mode, contentWidth),
+                  )
+                : OutlinedButton(
+                    onPressed: () => onChanged(mode),
+                    child: _label(mode, contentWidth),
+                  ),
+          ),
+      ],
+    );
+  }
+
+  Widget _label(bool mode, double width) => SizedBox(
+    width: width,
+    child: Row(
+      children: [
+        Icon(mode ? Icons.code : Icons.list_alt, size: 16),
+        const SizedBox(width: DeskSpace.gap),
+        Text(mode ? 'JSON' : 'Form'),
+      ],
+    ),
+  );
+}
