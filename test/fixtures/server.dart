@@ -40,6 +40,16 @@ class FixtureService extends Service {
         (v) => v,
       ),
     );
+    $addMethod(
+      ServiceMethod<List<int>, List<int>>(
+        'Chat',
+        chat,
+        true,
+        true,
+        (v) => v,
+        (v) => v,
+      ),
+    );
   }
   @override
   String get $name => 'runtime.fixture.Echo';
@@ -81,6 +91,33 @@ class FixtureService extends Service {
     return codec.encode('runtime.fixture.Payload', {
       'text': texts.isEmpty ? 'upload 0' : texts.join('|'),
       'signed': texts.length.toString(),
+    });
+  }
+
+  Stream<List<int>> chat(ServiceCall call, Stream<List<int>> requests) async* {
+    call.headers!.addAll({
+      'echo-header': call.clientMetadata?['x-test'] ?? 'chat',
+    });
+    call.sendHeaders();
+    yield codec.encode('runtime.fixture.Payload', {'text': 'ready'});
+    var count = 0;
+    await for (final bytes in requests) {
+      if (call.isCanceled) return;
+      final body = codec.decode('runtime.fixture.Payload', bytes) as Map;
+      if (body['text'] == 'error') {
+        throw const GrpcError.internal('Chat failed');
+      }
+      if (body['text'] == 'slow') {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+      if (call.isCanceled) return;
+      count++;
+      yield bytes;
+    }
+    call.trailers!.addAll({'echo-trailer': 'chat-complete'});
+    yield codec.encode('runtime.fixture.Payload', {
+      'text': 'finished',
+      'signed': count.toString(),
     });
   }
 

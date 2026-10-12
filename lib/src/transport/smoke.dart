@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -63,7 +64,7 @@ Future<void> releaseSmoke(
     final uploadMethod = discovery.schema.methods.values.firstWhere(
       (m) => m.clientStreaming && !m.serverStreaming,
     );
-    final upload = engine.startClientStream(
+    final upload = engine.startRequestStream(
       uploadMethod,
       metadata: {'x-test': 'release-upload'},
     );
@@ -75,6 +76,34 @@ Future<void> releaseSmoke(
         (uploaded.messages.single as Map)['text'] != 'first|second' ||
         uploaded.headers['echo-header'] != 'release-upload') {
       throw StateError('Release client streaming failed');
+    }
+    final chatMethod = discovery.schema.methods.values.firstWhere(
+      (m) => m.clientStreaming && m.serverStreaming,
+    );
+    final firstMessage = Completer<void>();
+    final echoed = Completer<void>();
+    final chat = engine.startRequestStream(
+      chatMethod,
+      onMessage: (message) {
+        if ((message as Map)['text'] == 'ready') firstMessage.complete();
+        if (message['text'] == 'live') echoed.complete();
+      },
+    );
+    await firstMessage.future.timeout(const Duration(seconds: 3));
+    if (chat.inputClosed || chat.sentCount != 0) {
+      throw StateError('Bidi did not receive before sending');
+    }
+    chat.send({'text': 'live'});
+    await echoed.future.timeout(const Duration(seconds: 3));
+    if (chat.inputClosed) {
+      throw StateError('Bidi receive was buffered until half-close');
+    }
+    chat.finishSending();
+    final chatted = await chat.result;
+    if (chatted.code != 'OK' ||
+        chatted.messages.length != 3 ||
+        chatted.trailers['echo-trailer'] != 'chat-complete') {
+      throw StateError('Release bidirectional streaming failed');
     }
     final database = '${databaseRoot.path}/release-check.sqlite';
     var store = WorkspaceStore.open(database);
@@ -130,6 +159,8 @@ Future<void> releaseSmoke(
         'unary': result.code,
         'streamMessages': received,
         'clientStream': uploaded.code,
+        'bidirectionalStream': chatted.code,
+        'receivedBeforeHalfClose': true,
         'persistence': 'PASS',
         'nativeDataPath': nativeDataPath == null ? 'not applicable' : 'PASS',
       }),

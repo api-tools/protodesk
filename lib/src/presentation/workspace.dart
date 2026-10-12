@@ -217,7 +217,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'ProtoDesk',
-                        applicationVersion: '1.0.3',
+                        applicationVersion: '1.0.4',
                         applicationLegalese:
                             'MIT License · © 2026 ProtoDesk contributors',
                       ),
@@ -452,10 +452,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
               FilledButton(
                 onPressed: desk.invoking
                     ? desk.cancel
-                    : desk.connected &&
-                          desk.method != null &&
-                          !(desk.method!.clientStreaming &&
-                              desk.method!.serverStreaming)
+                    : desk.connected && desk.method != null
                     ? desk.invoke
                     : null,
                 child: Text(
@@ -469,9 +466,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
             ],
           ),
         ),
-        if (desk.method?.clientStreaming == true &&
-            desk.method?.serverStreaming == false)
-          requestStreamControls(),
+        if (desk.method?.clientStreaming == true) requestStreamControls(),
         Expanded(
           child: desk.method == null
               ? const Center(
@@ -490,14 +485,6 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       ),
                     ),
                     const SizedBox(height: DeskSpace.panel),
-                    if (desk.method!.clientStreaming &&
-                        desk.method!.serverStreaming) ...[
-                      const Text(
-                        'Bidirectional streaming is pending the next increment.',
-                        style: DeskType.secondary,
-                      ),
-                      const SizedBox(height: DeskSpace.gap),
-                    ],
                     if (jsonMode)
                       TextField(
                         controller: request,
