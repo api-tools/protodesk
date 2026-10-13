@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the compiled app twice against isolated, initially empty storage."""
 import os
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -20,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='protodesk-fresh-release-', dir=parent) 
     settings['PROTODESK_SMOKE_FRESH'] = '1'
     for _ in range(2):
         subprocess.run([str(executable)], env=settings, check=True, timeout=45)
-        with sqlite3.connect(str(Path(directory) / 'protodesk.sqlite')) as db:
+        with closing(sqlite3.connect(str(Path(directory) / 'protodesk.sqlite'))) as db:
             for table in ('servers', 'collections', 'collection_requests', 'history_items'):
                 assert db.execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0, table
     print('Packaged fresh startup/restart and persisted empty tables: PASS')
