@@ -1,0 +1,44 @@
+syntax="proto3";
+package editor.fixture;
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/empty.proto";
+message Child {
+ string name=1;
+ int32 count=2;
+ string custom_name=3 [json_name="customLABEL"];
+ oneof choice { string text=4; int32 number=5; }
+}
+message Node { string name=1; Node child=2; }
+message Editors {
+ Child child=1;
+ repeated Child children=2;
+ map<bool,Child> mapping=3;
+ Node recursive=4;
+ google.protobuf.Timestamp timestamp=5;
+ google.protobuf.Duration duration=6;
+ google.protobuf.FieldMask mask=7;
+ google.protobuf.DoubleValue double_value=8;
+ google.protobuf.FloatValue float_value=9;
+ google.protobuf.Int64Value int64_value=10;
+ google.protobuf.UInt64Value uint64_value=11;
+ google.protobuf.Int32Value int32_value=12;
+ google.protobuf.UInt32Value uint32_value=13;
+ google.protobuf.BoolValue bool_value=14;
+ google.protobuf.StringValue string_value=15;
+ google.protobuf.BytesValue bytes_value=16;
+ google.protobuf.Struct structured=17;
+ google.protobuf.Value value=18;
+ google.protobuf.ListValue list=19;
+ google.protobuf.Any any=20;
+ google.protobuf.Empty empty=21;
+ repeated google.protobuf.Timestamp timestamps=22;
+ repeated google.protobuf.Duration durations=23;
+ repeated google.protobuf.BoolValue bools=24;
+ repeated google.protobuf.Value values=25;
+}
+service Echo { rpc Unary(Editors) returns(Editors); }

@@ -41,6 +41,9 @@ class DistributionTests(unittest.TestCase):
                 items, leaves = package.sign(app, 'CERT', distribution=True)
             self.assertEqual(len(leaves), 5)
             self.assertEqual(items[-1], app)
+            strips = [i for i, c in enumerate(commands) if c[0] == '/usr/bin/strip']
+            self.assertEqual(len(strips), len(leaves))
+            self.assertLess(max(strips), next(i for i, c in enumerate(commands) if '--sign' in c))
             signs = [c for c in commands if '--sign' in c]
             self.assertEqual(len(signs), 7)
             self.assertTrue(all('--deep' not in c and '--timestamp' in c and '--options' in c for c in signs))

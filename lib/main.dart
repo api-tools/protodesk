@@ -88,9 +88,32 @@ Future<void> main() async {
         ),
       ),
     );
+    if (Platform.environment['PROTODESK_SMOKE_FRESH'] == '1') {
+      try {
+        for (final table in WorkspaceStore.columns.keys) {
+          if (store.list(table).isNotEmpty) {
+            throw StateError('Fresh startup populated $table');
+          }
+        }
+        if (desk.server != null ||
+            desk.connected ||
+            desk.connecting ||
+            desk.invoking) {
+          throw StateError('Fresh startup selected or connected a server');
+        }
+        stdout.writeln(
+          'Fresh packaged startup: PASS (all four user tables empty)',
+        );
+      } finally {
+        desk.dispose();
+        await directory.delete(recursive: true);
+      }
+      exit(0);
+    }
     runApp(ProtoDeskApp(desk: desk, tools: directory));
   } catch (e) {
-    if (Platform.environment.containsKey('PROTODESK_SMOKE_ENDPOINT')) {
+    if (Platform.environment.containsKey('PROTODESK_SMOKE_ENDPOINT') ||
+        Platform.environment['PROTODESK_SMOKE_FRESH'] == '1') {
       stderr.writeln('Release smoke failed: $e');
       exit(1);
     }

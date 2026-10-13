@@ -21,7 +21,7 @@ The pipeline is prepared; successful Developer ID signing/notarization must be e
    Leave credential flags absent and enter your Apple ID and app-specific password when prompted. An App Store Connect API key can alternatively be stored in this profile using notarytool's interactive setup.
 4. Verify readiness and run the local release:
    ```sh
-   cd /Users/hops/Projects/protodesk
+   cd /path/to/protodesk
    python3 tool/package_macos.py check
    flutter build macos --release
    sh tool/package_macos.sh

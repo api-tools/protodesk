@@ -28,8 +28,6 @@ Future<Record?> editRecord(
             record?[key]?.toString() ??
             (key.endsWith('Json')
                 ? (key == 'requestStreamJson' ? '[]' : '{}')
-                : key == 'address'
-                ? 'localhost:50051'
                 : ''),
       ),
   };
@@ -40,6 +38,7 @@ Future<Record?> editRecord(
       .cast<String>()
       .toList();
   String? error;
+  var caFile = record?['tlsCaFile'] as String? ?? '';
   var validation = '';
   final result = await showDialog<Record>(
     context: context,
@@ -81,6 +80,44 @@ Future<Record?> editRecord(
                     value: tls,
                     onChanged: (v) => setState(() => tls = v),
                   ),
+                  if (tls) ...[
+                    const Text('TLS trust', style: DeskType.heading),
+                    SelectableText(
+                      caFile.isEmpty ? 'System trust roots' : caFile,
+                      style: DeskType.secondary,
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        TextButton.icon(
+                          icon: const Icon(Icons.file_open_outlined),
+                          label: const Text('Choose CA certificate'),
+                          onPressed: () async {
+                            final picked = await openFile(
+                              acceptedTypeGroups: [
+                                const XTypeGroup(
+                                  label: 'CA certificate',
+                                  extensions: ['pem', 'crt', 'cer'],
+                                ),
+                              ],
+                            );
+                            if (picked == null) return;
+                            if (Platform.isMacOS) {
+                              await const MethodChannel(
+                                'dev.apitools.protodesk/storage',
+                              ).invokeMethod<void>('rememberPath', picked.path);
+                            }
+                            setState(() => caFile = picked.path);
+                          },
+                        ),
+                        if (caFile.isNotEmpty)
+                          TextButton(
+                            onPressed: () => setState(() => caFile = ''),
+                            child: const Text('Use system roots'),
+                          ),
+                      ],
+                    ),
+                  ],
                   SwitchListTile(
                     dense: true,
                     visualDensity: VisualDensity.compact,
@@ -196,6 +233,7 @@ Future<Record?> editRecord(
                   for (final e in fields.entries) e.key: e.value.text,
                   if (table == 'servers') ...{
                     'tlsEnabled': tls,
+                    'tlsCaFile': caFile,
                     'reflectionEnabled': reflection,
                     'protoFiles': files,
                     'protoFolders': folders,
@@ -243,6 +281,13 @@ Future<void> showServers(BuildContext context, DeskController desk) async {
           height: 420,
           child: ListView(
             children: [
+              if (desk.servers.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'No saved servers. Choose New server to add your endpoint.',
+                  ),
+                ),
               for (final s in desk.servers)
                 ListTile(
                   title: Text(s['name'] as String),

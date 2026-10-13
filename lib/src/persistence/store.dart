@@ -16,6 +16,7 @@ class WorkspaceStore {
       'name',
       'address',
       'tlsEnabled',
+      'tlsCaFile',
       'reflectionEnabled',
       'protoFilesJson',
       'protoFoldersJson',
@@ -60,6 +61,13 @@ class WorkspaceStore {
   WorkspaceStore._(this.db, this.path);
   static String defaultPath() {
     final env = Platform.environment;
+    final override = env['PROTODESK_DATA_DIR'];
+    if (override != null && override.isNotEmpty) {
+      if (!p.isAbsolute(override)) {
+        throw const FormatException('PROTODESK_DATA_DIR must be absolute');
+      }
+      return p.join(override, 'protodesk.sqlite');
+    }
     final base = Platform.isMacOS
         ? p.join(env['HOME']!, 'Library', 'Application Support')
         : Platform.isWindows
@@ -95,6 +103,14 @@ class WorkspaceStore {
           database.execute(
             'CREATE TABLE IF NOT EXISTS ${table.key} (workspace_id TEXT NOT NULL, id TEXT NOT NULL, ${declarations.join(', ')}, PRIMARY KEY(workspace_id,id)${table.key == 'collection_requests' ? ', FOREIGN KEY(workspace_id,collection_id) REFERENCES collections(workspace_id,id) ON DELETE CASCADE' : ''})',
           );
+          if (table.key == 'servers' &&
+              !database
+                  .select('PRAGMA table_info(servers)')
+                  .any((r) => r['name'] == 'tls_ca_file')) {
+            database.execute(
+              "ALTER TABLE servers ADD COLUMN tls_ca_file TEXT NOT NULL DEFAULT ''",
+            );
+          }
           if (table.value.contains('requestStreamJson')) {
             final existingColumns = database
                 .select('PRAGMA table_info(${table.key})')

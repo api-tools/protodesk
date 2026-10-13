@@ -49,6 +49,9 @@ app.*.map.json
 
 # Build products and local workspace data
 /dist/
+*.sqlite
+*.sqlite3
+*.db
 *.sqlite-wal
 *.sqlite-shm
 *.srl

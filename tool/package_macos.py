@@ -82,6 +82,9 @@ def identity_and_profile(environ):
 
 def sign(app, identity, keychain='', distribution=False):
     items, leaves = code_inventory(app)
+    # Remove developer object/source paths before producing any signed bundle.
+    for leaf in leaves:
+        run(['/usr/bin/strip', '-S', '-x', leaf])
     for item in items:
         args = ['/usr/bin/codesign', '--force', '--sign', identity]
         if keychain:

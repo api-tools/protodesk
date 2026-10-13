@@ -7,6 +7,12 @@ import '../schema/codec.dart';
 import 'controller.dart';
 import 'design.dart';
 
+class _UnsetField {
+  const _UnsetField();
+}
+
+const unsetFieldValue = _UnsetField();
+
 /// Local text drafts keep focus and invalid edits without corrupting the request.
 class FieldEditor extends StatefulWidget {
   final ProtoField field;
@@ -15,6 +21,7 @@ class FieldEditor extends StatefulWidget {
   final ValueChanged<Object?> onChanged;
   final Set<String> ancestors;
   final int depth;
+  final bool present;
   const FieldEditor({
     super.key,
     required this.field,
@@ -23,15 +30,21 @@ class FieldEditor extends StatefulWidget {
     required this.onChanged,
     this.ancestors = const {},
     this.depth = 0,
+    this.present = true,
   });
   @override
   State<FieldEditor> createState() => _FieldEditorState();
 }
 
-class _FieldEditorState extends State<FieldEditor> {
+class _FieldEditorState extends State<FieldEditor>
+    with AutomaticKeepAliveClientMixin<FieldEditor> {
+  @override
+  bool get wantKeepAlive => true;
   late final TextEditingController text;
   String? error;
   bool jsonMode = false;
+  final itemKeys = <UniqueKey>[];
+  int structureRevision = 0;
   ProtoField get field => widget.field;
   bool get map =>
       (field.type == 11 || field.type == 10) &&
@@ -48,10 +61,24 @@ class _FieldEditorState extends State<FieldEditor> {
     text = TextEditingController(text: _text(widget.value));
   }
 
-  String _text(Object? v) =>
-      ((field.type == 11 || field.type == 10) && !scalarWrapper)
-      ? pretty.convert(v ?? {})
+  String _text(Object? v, {bool? present}) => jsonInput
+      ? pretty.convert(
+          v ??
+              (field.typeName == 'google.protobuf.Value' &&
+                      (present ?? widget.present)
+                  ? null
+                  : {}),
+        )
       : v?.toString() ?? '';
+  bool get stringWellKnown => const {
+    'google.protobuf.Timestamp',
+    'google.protobuf.Duration',
+    'google.protobuf.FieldMask',
+  }.contains(field.typeName);
+  bool get jsonInput =>
+      (field.type == 11 || field.type == 10) &&
+      !scalarWrapper &&
+      !stringWellKnown;
   bool get scalarWrapper =>
       field.typeName.startsWith('google.protobuf.') &&
       ProtoCodec.wrappers.containsKey(field.typeName.split('.').last);
@@ -61,10 +88,21 @@ class _FieldEditorState extends State<FieldEditor> {
   @override
   void didUpdateWidget(covariant FieldEditor old) {
     super.didUpdateWidget(old);
-    if (old.value != widget.value &&
-        error == null &&
+    if (_text(old.value, present: old.present) != _text(widget.value) &&
         text.text != _text(widget.value)) {
-      text.text = _text(widget.value);
+      error = null;
+      if (widget.value == null) structureRevision++;
+      final next = _text(widget.value);
+      // Updating a TextFormField controller during its parent's build would
+      // notify the Form while the widget tree is still being rebuilt.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _text(widget.value) == next && text.text != next) {
+          text.value = TextEditingValue(
+            text: next,
+            selection: TextSelection.collapsed(offset: next.length),
+          );
+        }
+      });
     }
   }
 
@@ -84,7 +122,7 @@ class _FieldEditorState extends State<FieldEditor> {
     ValueChanged<Object?> changed,
     int index,
   ) => FieldEditor(
-    key: ValueKey('${field.name}-$index'),
+    key: ValueKey(field.name),
     field: f,
     schema: widget.schema,
     value: value,
@@ -94,15 +132,23 @@ class _FieldEditorState extends State<FieldEditor> {
   );
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     if (field.repeated && !map) {
       final values = widget.value is List
           ? List<Object?>.from(widget.value as List)
           : <Object?>[];
+      while (itemKeys.length < values.length) {
+        itemKeys.add(UniqueKey());
+      }
+      if (itemKeys.length > values.length) {
+        itemKeys.removeRange(values.length, itemKeys.length);
+      }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < values.length; i++)
             Padding(
+              key: itemKeys[i],
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,7 +162,7 @@ class _FieldEditorState extends State<FieldEditor> {
                   ),
                   Expanded(
                     child: editor(field.item, values[i], (v) {
-                      values[i] = v;
+                      values[i] = identical(v, unsetFieldValue) ? null : v;
                       update(values);
                     }, i),
                   ),
@@ -124,6 +170,7 @@ class _FieldEditorState extends State<FieldEditor> {
                     tooltip: 'Remove item ${i + 1}',
                     onPressed: () {
                       values.removeAt(i);
+                      itemKeys.removeAt(i);
                       update(values);
                     },
                     icon: const Icon(Icons.remove_circle_outline, size: 18),
@@ -150,6 +197,7 @@ class _FieldEditorState extends State<FieldEditor> {
                       )
                     : codec.defaultValue(field.item),
               );
+              itemKeys.add(UniqueKey());
               update(values);
             },
             icon: const Icon(Icons.add, size: 16),
@@ -174,6 +222,7 @@ class _FieldEditorState extends State<FieldEditor> {
               ),
               TextButton(
                 onPressed: () {
+                  if (Form.maybeOf(context)?.validate() == false) return;
                   setState(() {
                     jsonMode = true;
                     text.text = pretty.convert(widget.value ?? {});
@@ -189,6 +238,7 @@ class _FieldEditorState extends State<FieldEditor> {
             ],
           ),
           Container(
+            key: ValueKey(structureRevision),
             padding: const EdgeInsets.only(left: 12),
             decoration: const BoxDecoration(
               border: Border(left: BorderSide(color: Color(0xff344048))),
@@ -209,11 +259,19 @@ class _FieldEditorState extends State<FieldEditor> {
                           key: ValueKey(f.name),
                           field: f,
                           schema: widget.schema,
-                          value: value[f.jsonName],
+                          value: value.containsKey(f.jsonName)
+                              ? value[f.jsonName]
+                              : value[f.name],
+                          present:
+                              value.containsKey(f.jsonName) ||
+                              value.containsKey(f.name),
                           ancestors: {...widget.ancestors, field.typeName},
                           depth: widget.depth + 1,
                           onChanged: (v) {
-                            if (v == null) {
+                            value.remove(f.name);
+                            if (identical(v, unsetFieldValue) ||
+                                (v == null &&
+                                    f.typeName != 'google.protobuf.Value')) {
                               value.remove(f.jsonName);
                             } else {
                               if (f.oneof != null) {
@@ -221,6 +279,7 @@ class _FieldEditorState extends State<FieldEditor> {
                                   (s) => s.oneof == f.oneof,
                                 )) {
                                   value.remove(sibling.jsonName);
+                                  value.remove(sibling.name);
                                 }
                               }
                               value[f.jsonName] = v;
@@ -268,12 +327,7 @@ class _FieldEditorState extends State<FieldEditor> {
         onChanged: (v) => update(v == '' ? null : v),
       );
     }
-    final json =
-        (field.type == 11 || field.type == 10) &&
-        !scalarWrapper &&
-        field.typeName != 'google.protobuf.Timestamp' &&
-        field.typeName != 'google.protobuf.Duration' &&
-        field.typeName != 'google.protobuf.FieldMask';
+    final json = jsonInput;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -286,7 +340,8 @@ class _FieldEditorState extends State<FieldEditor> {
                 : null,
             child: const Text('Switch to Form'),
           ),
-        TextField(
+        TextFormField(
+          validator: (_) => error,
           controller: text,
           maxLines: json ? 4 : 1,
           style: json ? DeskType.code : DeskType.body,
@@ -299,17 +354,26 @@ class _FieldEditorState extends State<FieldEditor> {
                     tooltip: 'Choose date',
                     icon: const Icon(Icons.calendar_month, size: 18),
                     onPressed: () async {
+                      final fraction = RegExp(r'\.(\d{1,9})')
+                          .firstMatch(text.text)
+                          ?.group(1);
+                      final parsed = DateTime.tryParse(text.text)?.toUtc();
+                      final initial =
+                          parsed != null &&
+                              parsed.year >= 1 &&
+                              parsed.year <= 9999
+                          ? parsed
+                          : DateTime.now().toUtc();
                       final date = await showDatePicker(
                         context: context,
-                        firstDate: DateTime(1970),
-                        lastDate: DateTime(2200),
-                        initialDate:
-                            DateTime.tryParse(text.text) ?? DateTime.now(),
+                        firstDate: DateTime(1),
+                        lastDate: DateTime(9999, 12, 31),
+                        initialDate: initial,
                       );
                       if (date != null && context.mounted) {
                         final hour = await showTimePicker(
                           context: context,
-                          initialTime: const TimeOfDay(hour: 0, minute: 0),
+                          initialTime: TimeOfDay.fromDateTime(initial),
                         );
                         if (hour != null) {
                           final value = DateTime.utc(
@@ -318,9 +382,16 @@ class _FieldEditorState extends State<FieldEditor> {
                             date.day,
                             hour.hour,
                             hour.minute,
+                            initial.second,
+                            initial.millisecond,
+                            initial.microsecond,
                           ).toIso8601String();
-                          text.text = value;
-                          update(value);
+                          final precise = value.replaceFirst(
+                            RegExp(r'\.\d+Z$'),
+                            fraction == null ? 'Z' : '.${fraction}Z',
+                          );
+                          text.text = precise;
+                          update(precise);
                         }
                       }
                     },
@@ -331,10 +402,13 @@ class _FieldEditorState extends State<FieldEditor> {
             try {
               Object? value;
               if (raw.isEmpty) {
-                value = null;
+                value =
+                    (scalarWrapper && {9, 12}.contains(scalarType)) ||
+                        field.typeName == 'google.protobuf.FieldMask'
+                    ? ''
+                    : null;
               } else if (json) {
                 value = jsonDecode(raw);
-                ProtoCodec(widget.schema).encode(field.typeName, value);
               } else if ({1, 2}.contains(scalarType)) {
                 value = num.tryParse(raw) ?? raw;
               } else if ({5, 7, 13, 15, 17}.contains(scalarType)) {
@@ -342,8 +416,18 @@ class _FieldEditorState extends State<FieldEditor> {
               } else {
                 value = raw;
               }
+              if (value != null ||
+                  (json &&
+                      raw == 'null' &&
+                      field.typeName == 'google.protobuf.Value')) {
+                ProtoCodec(widget.schema).validateField(field, value);
+              }
               setState(() => error = null);
-              update(value);
+              update(
+                raw.isEmpty && field.typeName == 'google.protobuf.Value'
+                    ? unsetFieldValue
+                    : value,
+              );
             } catch (e) {
               setState(() => error = e.toString());
             }

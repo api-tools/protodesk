@@ -27,6 +27,14 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
   double? navigationWidth;
   double requestFraction = .5;
   bool jsonMode = false;
+  final requestForm = GlobalKey<FormState>();
+  bool validForm() {
+    if (jsonMode || requestForm.currentState?.validate() != false) return true;
+    desk.status = 'Fix invalid form fields before sending or switching to JSON';
+    desk.emit();
+    return false;
+  }
+
   final responseTree = GlobalKey<ResponseTreeState>();
   final collapsed = <String>{};
   DeskController get desk => widget.desk;
@@ -344,6 +352,8 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                     child: Text(
                       desk.connected
                           ? 'No services found. Enable reflection or configure proto sources in Servers.'
+                          : desk.servers.isEmpty
+                          ? 'Add a server in Servers to discover its APIs.'
                           : 'Connect to a server to discover its APIs.',
                       style: DeskType.body.copyWith(color: Colors.grey),
                     ),
@@ -453,7 +463,9 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                 onPressed: desk.invoking
                     ? desk.cancel
                     : desk.connected && desk.method != null
-                    ? desk.invoke
+                    ? () {
+                        if (validForm()) desk.invoke();
+                      }
                     : null,
                 child: Text(
                   desk.invoking
@@ -475,71 +487,76 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                     style: TextStyle(color: Colors.grey),
                   ),
                 )
-              : ListView(
-                  padding: const EdgeInsets.all(DeskSpace.panel),
-                  children: [
-                    SelectableText(
-                      desk.method!.path,
-                      style: DeskType.code.copyWith(
-                        color: const Color(0xff55d6b0),
+              : Form(
+                  key: requestForm,
+                  child: ListView(
+                    padding: const EdgeInsets.all(DeskSpace.panel),
+                    children: [
+                      SelectableText(
+                        desk.method!.path,
+                        style: DeskType.code.copyWith(
+                          color: const Color(0xff55d6b0),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: DeskSpace.panel),
-                    if (jsonMode)
-                      TextField(
-                        controller: request,
-                        minLines: 12,
-                        maxLines: 24,
-                        style: DeskType.code,
-                        decoration: InputDecoration(
-                          labelText: 'Protobuf JSON',
-                          contentPadding: const EdgeInsets.all(DeskSpace.inset),
-                          alignLabelWithHint: true,
-                          errorText: desk.validateBody(desk.body),
+                      const SizedBox(height: DeskSpace.panel),
+                      if (jsonMode)
+                        TextField(
+                          controller: request,
+                          minLines: 12,
+                          maxLines: 24,
+                          style: DeskType.code,
+                          decoration: InputDecoration(
+                            labelText: 'Protobuf JSON',
+                            contentPadding: const EdgeInsets.all(
+                              DeskSpace.inset,
+                            ),
+                            alignLabelWithHint: true,
+                            errorText: desk.validateBody(desk.body),
+                          ),
+                          onChanged: desk.setBody,
+                        )
+                      else
+                        ...formFields(),
+                      const SizedBox(height: 20),
+                      ExpansionTile(
+                        minTileHeight: DeskSpace.control,
+                        dense: true,
+                        tilePadding: EdgeInsets.zero,
+                        title: const Text(
+                          'Metadata & call options',
+                          style: DeskType.label,
                         ),
-                        onChanged: desk.setBody,
-                      )
-                    else
-                      ...formFields(),
-                    const SizedBox(height: 20),
-                    ExpansionTile(
-                      minTileHeight: DeskSpace.control,
-                      dense: true,
-                      tilePadding: EdgeInsets.zero,
-                      title: const Text(
-                        'Metadata & call options',
-                        style: DeskType.label,
+                        children: [
+                          MetadataEditor(
+                            key: ValueKey(desk.method?.path),
+                            text: desk.metadata,
+                            onChanged: (v) {
+                              desk.metadata = v;
+                            },
+                          ),
+                          const SizedBox(height: DeskSpace.inset),
+                          TextField(
+                            controller: timeout,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Timeout (ms)',
+                            ),
+                            onChanged: (v) =>
+                                desk.timeoutMs = int.tryParse(v) ?? 5000,
+                          ),
+                          const SizedBox(height: DeskSpace.inset),
+                          TextField(
+                            controller: authority,
+                            decoration: const InputDecoration(
+                              labelText: 'Authority override (optional)',
+                            ),
+                            onChanged: (v) => desk.authority = v,
+                          ),
+                          const SizedBox(height: DeskSpace.inset),
+                        ],
                       ),
-                      children: [
-                        MetadataEditor(
-                          key: ValueKey(desk.method?.path),
-                          text: desk.metadata,
-                          onChanged: (v) {
-                            desk.metadata = v;
-                          },
-                        ),
-                        const SizedBox(height: DeskSpace.inset),
-                        TextField(
-                          controller: timeout,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Timeout (ms)',
-                          ),
-                          onChanged: (v) =>
-                              desk.timeoutMs = int.tryParse(v) ?? 5000,
-                        ),
-                        const SizedBox(height: DeskSpace.inset),
-                        TextField(
-                          controller: authority,
-                          decoration: const InputDecoration(
-                            labelText: 'Authority override (optional)',
-                          ),
-                          onChanged: (v) => desk.authority = v,
-                        ),
-                        const SizedBox(height: DeskSpace.inset),
-                      ],
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
         ),
         if (desk.method != null)
@@ -556,6 +573,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
               child: DeskModeSwitch(
                 json: jsonMode,
                 onChanged: (value) {
+                  if (!jsonMode && value && !validForm()) return;
                   if (!value && desk.validateBody(desk.body) != null) {
                     desk.status =
                         'Fix the JSON request before switching to Form';
@@ -676,8 +694,14 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
           children: [
             TextButton(
               onPressed: desk.invoking
-                  ? (desk.canSend ? desk.sendDraft : null)
-                  : desk.queueDraft,
+                  ? (desk.canSend
+                        ? () {
+                            if (validForm()) desk.sendDraft();
+                          }
+                        : null)
+                  : () {
+                      if (validForm()) desk.queueDraft();
+                    },
               child: Text(desk.invoking ? 'Send message' : 'Queue message'),
             ),
             if (desk.invoking)
@@ -742,11 +766,16 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                 key: ValueKey('${desk.method!.path}-${f.name}'),
                 field: f,
                 schema: desk.schema,
-                value: body[f.jsonName] ?? body[f.name],
+                value: body.containsKey(f.jsonName)
+                    ? body[f.jsonName]
+                    : body[f.name],
+                present:
+                    body.containsKey(f.jsonName) || body.containsKey(f.name),
                 ancestors: {descriptor.name},
                 onChanged: (v) {
                   body.remove(f.name);
-                  if (v == null) {
+                  if (identical(v, unsetFieldValue) ||
+                      (v == null && f.typeName != 'google.protobuf.Value')) {
                     body.remove(f.jsonName);
                   } else {
                     if (f.oneof != null) {

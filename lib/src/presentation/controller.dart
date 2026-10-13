@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -39,18 +40,6 @@ class DeskController extends ChangeNotifier {
   bool _disposed = false;
   DeskController(this.store, this.engine) {
     refresh();
-    if (servers.isEmpty) {
-      server = store.save('servers', {
-        'name': 'Localhost',
-        'address': 'localhost:50051',
-        'tlsEnabled': false,
-        'reflectionEnabled': true,
-        'protoFiles': <String>[],
-        'protoFolders': <String>[],
-        'metadataJson': '{}',
-      });
-      refresh();
-    }
   }
   void emit() {
     if (!_disposed) notifyListeners();
@@ -84,10 +73,26 @@ class DeskController extends ChangeNotifier {
     emit();
     try {
       final s = server!;
+      List<int>? certificates;
+      final caFile = s['tlsCaFile'] as String? ?? '';
+      if (s['tlsEnabled'] == true && caFile.isNotEmpty) {
+        final file = File(caFile);
+        if (await file.length() > 1024 * 1024) {
+          throw const FormatException('TLS CA file exceeds 1 MiB');
+        }
+        certificates = await file.readAsBytes();
+        if (certificates.isEmpty || certificates.length > 1024 * 1024) {
+          throw const FormatException(
+            'TLS CA file must contain a certificate (at most 1 MiB)',
+          );
+        }
+      }
+      if (generation != _generation) return;
       final discovery = await engine.connect(
         ConnectionConfig(
           s['address'] as String,
           tls: s['tlsEnabled'] == true,
+          certificates: certificates,
           reflection: s['reflectionEnabled'] != false,
           files: (s['protoFiles'] as List? ?? []).cast<String>(),
           folders: (s['protoFolders'] as List? ?? []).cast<String>(),

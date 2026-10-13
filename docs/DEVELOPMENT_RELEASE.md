@@ -1,26 +1,23 @@
-# ProtoDesk 1.0.4 development release
+# ProtoDesk 1.0.5 development release
 
-This tested development patch supports all four gRPC modes. macOS is **ad-hoc signed and not notarized**; Windows is unsigned. Developer ID signing and notarization are deferred to final distribution. This prerelease does not claim Apple trust and does not replace the production signing gate.
+Fresh installations start with zero servers, collections, saved requests and history. No endpoint is prefilled and no connection starts automatically. Empty states guide users to add their own server. Existing saved data, including earlier Localhost profiles, is preserved on upgrade.
 
-- Compact, right-aligned Form/JSON icons retain tooltips, keyboard focus, an active-state indicator and drafts/validation.
-- Client and bidirectional streams support queued snapshots, live send/receive, explicit finish-sending, cancellation, deadlines and partial results. Response metadata is available while streams remain open.
-- Saved stream sequences now replay with backpressure: sequences longer than the 64-message live queue can be reused without exceeding that queue. Full-stream limits remain 1,000 messages / 64 MiB. Replay preserves snapshot order and wakes when cancelled.
-- Saved sequences and metadata survive database reopen, collection/history reuse and version 1 workspace import/export. Existing user data and the approved workspace layout are retained.
+Previously local fixes from example-server testing are reviewed and included:
 
-Validation: formatter/analyzer, 46 Flutter tests, 8 distribution-script tests, desktop release builds and compiled reflection/proto smoke for all four RPC modes on macOS, Windows and Linux.
+- Per-profile custom TLS CA selection with bounded certificate loading, sandbox bookmarks, migration and restart/import preservation. System roots remain the default; no test certificate is bundled or trusted automatically.
+- Nested Form fixes for repeated row identity, map validation, aliases/oneofs, offscreen invalid drafts and validation before send or JSON switching.
+- Well-known-type fixes for plain Timestamp/Duration/FieldMask inputs, historical date/time and nanosecond preservation, explicit Value null and empty StringValue/BytesValue presence.
+
+The separate Example Server, local user databases, profiles, logs and credentials are excluded from distributed bundles. Standard protobuf definitions remain bundled for dynamic schema compilation. Self-contained test fixtures are development dependencies and are not runtime assets or user-data seeds. Release CI audits archive contents and verifies fresh startup/restart with isolated empty storage on all three desktop platforms.
+
+Validation: formatter/analyzer, 64 Flutter tests, 12 distribution-script tests, desktop release builds, compiled reflection/proto smoke for all four RPC modes, and fresh packaged startup. The macOS package was also inspected interactively with isolated storage.
+
+macOS is **ad-hoc signed and not notarized**; Windows is unsigned. Developer ID signing and notarization remain deferred. No Flutter, Dart or protoc installation is needed to run the bundle.
 
 ## Run the downloaded bundle
 
-- macOS: extract `ProtoDesk-macos-development.zip` and open `ProtoDesk.app`. Universal Intel/Apple Silicon; ad-hoc signed, not notarized. macOS may require explicit approval for this downloaded app. Do not disable Gatekeeper.
-- Windows x64: extract the complete ZIP and run `protodesk.exe`; keep the DLLs/data beside it.
+- macOS: extract `ProtoDesk-macos-development.zip` and open `ProtoDesk.app`. Universal Intel/Apple Silicon; macOS may require explicit approval for this downloaded development app. Do not disable Gatekeeper.
+- Windows x64: extract the complete ZIP and run `protodesk.exe`; keep its DLLs/data beside it.
 - Linux x64: extract the archive and run `bundle/protodesk`; GTK 3 and desktop system libraries are required.
 
-No Flutter, Dart or protoc installation is needed. Verify downloaded files against `SHA256SUMS.txt`.
-
-## Owner test checklist
-
-1. Connect to an existing server and invoke unary and server-streaming methods.
-2. Queue distinct messages for a client stream, Start, send another message, then Finish sending; inspect the response and metadata.
-3. Start a bidirectional stream; confirm responses appear while sending remains open. Try cancellation and a short deadline and inspect retained partial results.
-4. Save a streaming sequence, restart, reconnect and replay it from Collections or History. Export/import a collection and replay the imported request.
-5. Switch Form/JSON with an invalid draft; confirm the draft/validation and pane resizing remain intact.
+Verify downloaded files against `SHA256SUMS.txt`. Optional `PROTODESK_DATA_DIR` selects an explicit absolute directory for isolated or portable user storage; without it the existing platform storage path is unchanged. It never clears data.

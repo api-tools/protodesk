@@ -50,27 +50,7 @@ class ProtoCodec {
         throw FormatException('Multiple members of oneof in $type');
       }
       if (isMap(f)) {
-        if (value is! Map) {
-          throw FormatException('${f.name} requires an object');
-        }
-        final map = message(f.typeName);
-        for (final e in value.entries) {
-          Object key = e.key;
-          final k = map.fields.first;
-          if (k.type == 8) {
-            if (key != 'true' && key != 'false') {
-              throw const FormatException('Invalid boolean map key');
-            }
-            key = key == 'true';
-          }
-          w.data(
-            f.number,
-            encode(f.typeName, {
-              k.jsonName: key,
-              map.fields[1].jsonName: e.value,
-            }, depth: depth + 1),
-          );
-        }
+        _writeMap(w, f, value, depth);
       } else if (f.repeated) {
         if (value is! List) {
           throw FormatException('${f.name} requires an array');
@@ -107,6 +87,49 @@ class ProtoCodec {
     if (f.type == 8) return v == false;
     if (f.type == 14) return v == 0 || v == schema.enums[f.typeName]?[0];
     return v == 0 || v == '0';
+  }
+
+  void validateField(ProtoField field, Object? value) {
+    final writer = WireWriter();
+    if (isMap(field)) {
+      _writeMap(writer, field, value, 0);
+    } else if (field.repeated) {
+      if (value is! List) {
+        throw const FormatException('Repeated field requires an array');
+      }
+      for (final item in value) {
+        _write(writer, field, item, 0);
+      }
+    } else {
+      _write(writer, field, value, 0);
+    }
+    if (writer.finish().length > 32 * 1024 * 1024) {
+      throw const FormatException('Field exceeds 32 MiB');
+    }
+  }
+
+  void _writeMap(WireWriter w, ProtoField f, Object? value, int depth) {
+    if (value is! Map) {
+      throw FormatException('${f.name} requires an object');
+    }
+    final map = message(f.typeName);
+    for (final e in value.entries) {
+      Object key = e.key;
+      final k = map.fields.first;
+      if (k.type == 8) {
+        if (key != 'true' && key != 'false') {
+          throw const FormatException('Invalid boolean map key');
+        }
+        key = key == 'true';
+      }
+      w.data(
+        f.number,
+        encode(f.typeName, {
+          k.jsonName: key,
+          map.fields[1].jsonName: e.value,
+        }, depth: depth + 1),
+      );
+    }
   }
 
   void _write(WireWriter w, ProtoField f, Object? v, int depth) {

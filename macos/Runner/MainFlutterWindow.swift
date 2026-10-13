@@ -5,6 +5,11 @@ import Darwin
 class MainFlutterWindow: NSWindow {
   private var scopeURLs: [URL] = []
   private var storeURL: URL {
+    // Explicit isolated/portable storage; normal upgrades use the existing path.
+    if let directory = ProcessInfo.processInfo.environment["PROTODESK_DATA_DIR"], !directory.isEmpty {
+      precondition(directory.hasPrefix("/"), "PROTODESK_DATA_DIR must be absolute")
+      return URL(fileURLWithPath: directory, isDirectory: true)
+    }
     // Foundation's home APIs are redirected to the sandbox container. The
     // account database supplies the existing desktop application's real path.
     guard let account = getpwuid(getuid()), let directory = account.pointee.pw_dir else {
