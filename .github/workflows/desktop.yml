@@ -2,7 +2,7 @@ name: Desktop
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v*', 'dev-v*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -161,3 +161,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --title "ProtoDesk ${GITHUB_REF_NAME}" --notes "Flutter desktop release. macOS is Developer ID signed, notarized and stapled; Windows is unsigned. Extract the complete bundle before running. No Flutter, Dart, or protoc installation is required." dist/*
+
+  release-development:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/dev-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a main-branch development release commit
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProtoDesk-windows
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProtoDesk-linux
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: ProtoDesk-macos-development
+          path: dist
+      - name: Require explicit development artifacts and checksum them
+        run: |
+          test -f dist/ProtoDesk-macos-development.zip
+          test -f dist/ProtoDesk-windows-x64.zip
+          test -f dist/ProtoDesk-linux-x64.tar.gz
+          test ! -e dist/macos-notarization.json
+          test ! -e dist/ProtoDesk-macos-universal.zip
+          cd dist
+          sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+      - name: Publish development prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --title "ProtoDesk ${GITHUB_REF_NAME#dev-} — development" --notes-file docs/DEVELOPMENT_RELEASE.md dist/*
