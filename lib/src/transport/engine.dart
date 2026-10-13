@@ -94,6 +94,7 @@ class RequestStreamCall {
   final ProtoMethod method;
   final _requests = StreamController<List<int>>();
   late final Future<CallResult> result;
+  Completer<void>? _capacity;
   bool _inputClosed = false, _completed = false;
   int _sentCount = 0,
       _sentBytes = 0,
@@ -109,6 +110,7 @@ class RequestStreamCall {
   Stream<List<int>> get requests => _requests.stream.map((bytes) {
     _queuedCount--;
     _queuedBytes -= bytes.length;
+    _wakeSender();
     return bytes;
   });
   void send(Object? message) {
@@ -138,9 +140,37 @@ class RequestStreamCall {
     _requests.add(bytes);
   }
 
+  void _wakeSender() {
+    _capacity?.complete();
+    _capacity = null;
+  }
+
+  /// Replay a saved snapshot without exceeding the live transport queue.
+  /// Closure wakes a waiting sender so cancellation/errors never strand replay.
+  Future<bool> sendWhenReady(Object? message) async {
+    final snapshot = jsonDecode(jsonEncode(message));
+    final length = codec.encode(method.input, snapshot).length;
+    if (length > RequestStreamLimits.queuedBytes) {
+      throw const GrpcError.resourceExhausted(
+        'Message exceeds 32 MiB send queue',
+      );
+    }
+    while (!_inputClosed &&
+        !_completed &&
+        (_queuedCount >= RequestStreamLimits.queuedMessages ||
+            _queuedBytes + length > RequestStreamLimits.queuedBytes)) {
+      _capacity ??= Completer<void>();
+      await _capacity!.future;
+    }
+    if (_inputClosed || _completed) return false;
+    send(snapshot);
+    return true;
+  }
+
   void finishSending() {
     if (_inputClosed) return;
     _inputClosed = true;
+    _wakeSender();
     // Closing queues the half-close after every previously accepted message.
     // A channel that never subscribed must not block cancellation cleanup.
     unawaited(_requests.close());

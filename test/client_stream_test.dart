@@ -49,6 +49,89 @@ void main() {
     await server.shutdown();
     await directory.delete(recursive: true);
   });
+  Future<void> until(bool Function() condition) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (!condition()) {
+      if (DateTime.now().isAfter(deadline)) fail('Replay did not become ready');
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+  }
+
+  test('saved sequences longer than the live queue survive restart/import and replay after reconnect', () async {
+    final sequence = List.generate(100, (i) => {'text': '$i'});
+    final collection = desk.store.save('collections', {'name': 'Replay'});
+    final saved = desk.store.save('collection_requests', {
+      ...desk.requestSnapshot(),
+      'name': '100 messages',
+      'collectionId': collection['id'],
+      'requestStreamJson': jsonEncode(sequence),
+    });
+    final exported = jsonDecode(jsonEncode(desk.store.exportWorkspace()));
+    final path = desk.store.path;
+    await desk.disconnect();
+    desk.dispose();
+    desk = DeskController(WorkspaceStore.open(path), engine);
+    desk.server = desk.servers.firstWhere((s) => s['id'] == saved['serverId']);
+    await desk.connect();
+    desk.loadRequest(desk.store.list('collection_requests').single);
+    expect(desk.queuedRequests, sequence);
+    var pending = desk.invoke();
+    await until(() => desk.canSend);
+    expect(desk.sentRequests, sequence);
+    desk.finishSending();
+    await pending;
+    expect(desk.result!.code, 'OK');
+    expect((desk.messages.single as Map)['signed'], '100');
+    final history = desk.history.single;
+    expect(jsonDecode(history['requestStreamJson'] as String), sequence);
+    await desk.disconnect();
+    await desk.connect();
+    desk.loadRequest(history);
+    pending = desk.invoke();
+    await until(() => desk.canSend);
+    desk.finishSending();
+    await pending;
+    expect(desk.result!.code, 'OK');
+    desk.store.importWorkspace(exported);
+    final imported = desk.store
+        .list('collection_requests')
+        .firstWhere((r) => r['id'] != saved['id']);
+    desk.loadRequest(imported);
+    pending = desk.invoke();
+    await until(() => desk.canSend);
+    desk.finishSending();
+    await pending;
+    expect(desk.result!.code, 'OK');
+    expect((desk.messages.single as Map)['signed'], '100');
+  });
+
+  test(
+    'backpressure snapshots messages and wakes waiting replay on cancellation',
+    () async {
+      final call = engine.startRequestStream(desk.method!);
+      for (var i = 0; i < 64; i++) {
+        call.send({'text': '$i'});
+      }
+      final value = {'text': 'snapshot'};
+      final waiting = call.sendWhenReady(value);
+      value['text'] = 'changed';
+      expect(call.queuedCount, lessThanOrEqualTo(64));
+      expect(await waiting, true);
+      call.finishSending();
+      final result = await call.result;
+      expect((result.messages.single as Map)['text'], endsWith('|snapshot'));
+      final cancelled = engine.startRequestStream(desk.method!);
+      for (var i = 0; i < 64; i++) {
+        cancelled.send({'text': '$i'});
+      }
+      final blocked = cancelled.sendWhenReady({'text': 'not accepted'});
+      final cancellation = engine.cancel();
+      expect(await blocked.timeout(const Duration(seconds: 3)), false);
+      await cancellation;
+      expect((await cancelled.result).code, 'CANCELLED');
+    },
+  );
+
   test('client stream stays open until half-close, snapshots messages and retains metadata', () async {
     final call = engine.startRequestStream(
       desk.method!,
@@ -167,7 +250,7 @@ void main() {
     desk.metadata = '{"x-test":"request"}';
     final pending = desk.invoke();
     expect(desk.invoking, true);
-    expect(desk.canSend, true);
+    await until(() => desk.canSend);
     desk.setBody('{"text":"third"}');
     desk.sendDraft();
     desk.setBody('{');

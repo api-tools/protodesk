@@ -30,8 +30,10 @@ class DeskController extends ChangeNotifier {
   final queuedRequests = <Object?>[];
   List<Object?> sentRequests = [];
   RequestStreamCall? requestStream;
+  bool replaying = false;
   bool get sendingFinished => requestStream?.inputClosed ?? true;
-  bool get canSend => invoking && requestStream != null && !sendingFinished;
+  bool get canSend =>
+      invoking && !replaying && requestStream != null && !sendingFinished;
 
   int _generation = 0;
   bool _disposed = false;
@@ -120,6 +122,7 @@ class DeskController extends ChangeNotifier {
     schema = SchemaRegistry();
     method = null;
     requestStream = null;
+    replaying = false;
     queuedRequests.clear();
     sentRequests = [];
     result = null;
@@ -137,6 +140,7 @@ class DeskController extends ChangeNotifier {
     invoking = false;
     method = selected;
     requestStream = null;
+    replaying = false;
     queuedRequests.clear();
     sentRequests = [];
     body = '{}';
@@ -163,19 +167,29 @@ class DeskController extends ChangeNotifier {
     emit();
   }
 
-  String? validateQueue(List<Object?> values) {
+  String? validateQueue(List<Object?> values, {bool replay = false}) {
     try {
-      if (values.length > RequestStreamLimits.queuedMessages) {
-        throw const FormatException('Queue is limited to 64 messages');
+      if (values.length >
+          (replay
+              ? RequestStreamLimits.messages
+              : RequestStreamLimits.queuedMessages)) {
+        throw FormatException(
+          'Queue is limited to ${replay ? 1000 : 64} messages',
+        );
       }
       var wire = 0, json = 0;
       for (final value in values) {
         wire += ProtoCodec(schema).encode(method!.input, value).length;
         json += utf8.encode(jsonEncode(value)).length;
       }
-      if (wire > RequestStreamLimits.queuedBytes ||
+      if (wire >
+              (replay
+                  ? RequestStreamLimits.wireBytes
+                  : RequestStreamLimits.queuedBytes) ||
           json > RequestStreamLimits.jsonBytes) {
-        throw const FormatException('Queue exceeds 32 MiB wire or 64 MiB JSON');
+        throw FormatException(
+          'Queue exceeds ${replay ? 64 : 32} MiB wire or 64 MiB JSON',
+        );
       }
       return null;
     } catch (e) {
@@ -244,7 +258,7 @@ class DeskController extends ChangeNotifier {
       return;
     }
     if (method!.clientStreaming) {
-      final invalid = validateQueue(queuedRequests);
+      final invalid = validateQueue(queuedRequests, replay: true);
       if (invalid != null) {
         status = invalid;
         emit();
@@ -307,11 +321,17 @@ class DeskController extends ChangeNotifier {
           onMessage: onMessage,
           onHeaders: onHeaders,
         );
-        for (final value in queuedRequests) {
-          requestStream!.send(value);
+        final call = requestStream!;
+        final sequence = List<Object?>.of(queuedRequests);
+        queuedRequests.clear();
+        replaying = sequence.isNotEmpty;
+        emit();
+        for (final value in sequence) {
+          if (!await call.sendWhenReady(value)) break;
           outgoing.add(value);
         }
-        queuedRequests.clear();
+        if (generation != _generation) return;
+        replaying = false;
         status =
             '${selected.serverStreaming ? 'Bidirectional' : 'Client'} stream open; ${outgoing.length} messages sent';
         emit();
@@ -340,6 +360,7 @@ class DeskController extends ChangeNotifier {
     }
     if (generation != _generation) return;
     callClock.stop();
+    replaying = false;
     result = response;
     invoking = false;
     status =
@@ -385,6 +406,7 @@ class DeskController extends ChangeNotifier {
     invoking = false;
     method = schema.methods[item['fullMethod']];
     requestStream = null;
+    replaying = false;
     sentRequests = [];
     queuedRequests.clear();
     final queue = jsonDecode(item['requestStreamJson'] as String? ?? '[]');
