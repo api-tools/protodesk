@@ -20,9 +20,9 @@ Proto2/proto3 schemas are supported; protobuf editions are currently rejected wi
 
 ## Downloads
 
-Download the complete desktop bundle from [Releases](https://github.com/api-tools/protodesk/releases). End users do not need Flutter, Dart, or protoc.
+Download the tested [1.0.4 development patch](https://github.com/api-tools/protodesk/releases/tag/dev-v1.0.4) or browse [Releases](https://github.com/api-tools/protodesk/releases). Development releases use `dev-v*` tags and are explicitly marked as prereleases; production `v*` tags retain the separate fail-closed signing/notarization gate. End users do not need Flutter, Dart, or protoc.
 
-- macOS: extract `ProtoDesk.app`. Universal Intel/Apple Silicon app, ad-hoc signed, **not notarized**. macOS may require explicit approval to open an app downloaded outside the App Store.
+- macOS: extract `ProtoDesk.app`. Universal Intel/Apple Silicon app (`ProtoDesk-macos-development.zip` for development releases), ad-hoc signed, **not notarized**. macOS may require explicit approval to open an app downloaded outside the App Store.
 - Windows x64: extract the entire ZIP and run `protodesk.exe`. The executable is **unsigned**; retain the DLLs and data directory beside it.
 - Linux x64: extract the archive and run `bundle/protodesk`. GTK 3 and the usual desktop system libraries must be installed.
 
@@ -54,7 +54,7 @@ flutter build macos --release   # or windows / linux
 python3 tool/package_macos.py development  # explicit ad-hoc development ZIP
 ```
 
-Developer ID distribution is prepared separately and requires real local credentials and notarization evidence before publication; see [the signing setup guide](docs/MACOS_DISTRIBUTION.md). The current public macOS download description above remains unchanged until that verification succeeds.
+Developer ID distribution is prepared separately and requires real local credentials and notarization evidence before publication; see [the signing setup guide](docs/MACOS_DISTRIBUTION.md). Apple credential setup and final signed distribution are deferred. Development releases do not need those credentials; their ad-hoc macOS status is explicit.
 
 Tests use a new Dart fixture service and an API schema loaded at runtime. They cover wire interoperability with protoc, reflection variants, proto-only discovery, unary errors and deadlines, TLS trust, metadata, streaming completion/failure/cancellation/limits, request editors, SQLite persistence, and transactional workspace transfer. CI builds and exercises compiled releases separately on all three operating systems.
 
