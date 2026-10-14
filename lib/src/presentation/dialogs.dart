@@ -15,258 +15,290 @@ Future<Record?> editRecord(
   DeskController desk,
   String table, [
   Record? record,
-]) async {
-  final keys = table == 'servers'
-      ? ['name', 'address', 'metadataJson']
-      : table == 'collections'
-      ? ['name', 'description']
-      : ['name', 'requestJson', 'requestStreamJson', 'requestMetadataJson'];
-  final fields = {
-    for (final key in keys)
-      key: TextEditingController(
-        text:
-            record?[key]?.toString() ??
-            (key.endsWith('Json')
-                ? (key == 'requestStreamJson' ? '[]' : '{}')
-                : ''),
-      ),
-  };
-  var tls = record?['tlsEnabled'] == true,
-      reflection = record?['reflectionEnabled'] != false;
-  final files = (record?['protoFiles'] as List? ?? []).cast<String>().toList();
-  final folders = (record?['protoFolders'] as List? ?? [])
-      .cast<String>()
-      .toList();
+]) => showDialog<Record>(
+  context: context,
+  builder: (_) => _EditRecordDialog(desk: desk, table: table, record: record),
+);
+
+class _EditRecordDialog extends StatefulWidget {
+  final DeskController desk;
+  final String table;
+  final Record? record;
+  const _EditRecordDialog({
+    required this.desk,
+    required this.table,
+    this.record,
+  });
+  @override
+  State<_EditRecordDialog> createState() => _EditRecordDialogState();
+}
+
+class _EditRecordDialogState extends State<_EditRecordDialog> {
+  DeskController get desk => widget.desk;
+  String get table => widget.table;
+  Record? get record => widget.record;
+  late final Map<String, TextEditingController> fields;
+  late final List<String> files, folders;
+  late bool tls, reflection;
+  late String caFile;
   String? error;
-  var caFile = record?['tlsCaFile'] as String? ?? '';
-  var validation = '';
-  final result = await showDialog<Record>(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: Text(
-          '${record == null ? 'Create' : 'Edit'} ${table == 'servers'
-              ? 'server'
-              : table == 'collections'
-              ? 'collection'
-              : 'saved request'}',
+  String validation = '';
+
+  @override
+  void initState() {
+    super.initState();
+    final keys = table == 'servers'
+        ? ['name', 'address', 'metadataJson']
+        : table == 'collections'
+        ? ['name', 'description']
+        : ['name', 'requestJson', 'requestStreamJson', 'requestMetadataJson'];
+    fields = {
+      for (final key in keys)
+        key: TextEditingController(
+          text:
+              record?[key]?.toString() ??
+              (key.endsWith('Json')
+                  ? (key == 'requestStreamJson' ? '[]' : '{}')
+                  : ''),
         ),
-        content: SizedBox(
-          width: 620,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final key in keys)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: TextField(
-                      controller: fields[key],
-                      style: key.endsWith('Json')
-                          ? DeskType.code
-                          : DeskType.body,
-                      decoration: InputDecoration(labelText: key),
-                      minLines: key.endsWith('Json') ? 3 : 1,
-                      maxLines: key.endsWith('Json') ? 5 : 1,
+    };
+    tls = record?['tlsEnabled'] == true;
+    reflection = record?['reflectionEnabled'] != false;
+    files = (record?['protoFiles'] as List? ?? []).cast<String>().toList();
+    folders = (record?['protoFolders'] as List? ?? []).cast<String>().toList();
+    caFile = record?['tlsCaFile'] as String? ?? '';
+  }
+
+  @override
+  void dispose() {
+    for (final field in fields.values) {
+      field.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      '${record == null ? 'Create' : 'Edit'} ${table == 'servers'
+          ? 'server'
+          : table == 'collections'
+          ? 'collection'
+          : 'saved request'}',
+    ),
+    content: SizedBox(
+      width: 620,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final key in fields.keys)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TextField(
+                  controller: fields[key],
+                  style: key.endsWith('Json') ? DeskType.code : DeskType.body,
+                  decoration: InputDecoration(labelText: key),
+                  minLines: key.endsWith('Json') ? 3 : 1,
+                  maxLines: key.endsWith('Json') ? 5 : 1,
+                ),
+              ),
+            if (table == 'servers') ...[
+              SwitchListTile(
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('TLS'),
+                value: tls,
+                onChanged: (v) => setState(() => tls = v),
+              ),
+              if (tls) ...[
+                const Text('TLS trust', style: DeskType.heading),
+                SelectableText(
+                  caFile.isEmpty ? 'System trust roots' : caFile,
+                  style: DeskType.secondary,
+                ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.file_open_outlined),
+                      label: const Text('Choose CA certificate'),
+                      onPressed: () async {
+                        final picked = await openFile(
+                          acceptedTypeGroups: [
+                            const XTypeGroup(
+                              label: 'CA certificate',
+                              extensions: ['pem', 'crt', 'cer'],
+                            ),
+                          ],
+                        );
+                        if (!mounted || picked == null) return;
+                        if (Platform.isMacOS) {
+                          await const MethodChannel(
+                            'dev.apitools.protodesk/storage',
+                          ).invokeMethod<void>('rememberPath', picked.path);
+                        }
+                        if (!mounted) return;
+                        setState(() => caFile = picked.path);
+                      },
                     ),
-                  ),
-                if (table == 'servers') ...[
-                  SwitchListTile(
-                    dense: true,
-                    visualDensity: VisualDensity.compact,
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('TLS'),
-                    value: tls,
-                    onChanged: (v) => setState(() => tls = v),
-                  ),
-                  if (tls) ...[
-                    const Text('TLS trust', style: DeskType.heading),
-                    SelectableText(
-                      caFile.isEmpty ? 'System trust roots' : caFile,
-                      style: DeskType.secondary,
+                    if (caFile.isNotEmpty)
+                      TextButton(
+                        onPressed: () => setState(() => caFile = ''),
+                        child: const Text('Use system roots'),
+                      ),
+                  ],
+                ),
+              ],
+              SwitchListTile(
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Server reflection'),
+                value: reflection,
+                onChanged: (v) => setState(() => reflection = v),
+              ),
+              const Text('Proto sources', style: DeskType.heading),
+              for (final file in [...files, ...folders])
+                Row(
+                  children: [
+                    Expanded(
+                      child: SelectableText(file, style: DeskType.secondary),
                     ),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        TextButton.icon(
-                          icon: const Icon(Icons.file_open_outlined),
-                          label: const Text('Choose CA certificate'),
-                          onPressed: () async {
-                            final picked = await openFile(
-                              acceptedTypeGroups: [
-                                const XTypeGroup(
-                                  label: 'CA certificate',
-                                  extensions: ['pem', 'crt', 'cer'],
-                                ),
-                              ],
-                            );
-                            if (picked == null) return;
-                            if (Platform.isMacOS) {
-                              await const MethodChannel(
-                                'dev.apitools.protodesk/storage',
-                              ).invokeMethod<void>('rememberPath', picked.path);
-                            }
-                            setState(() => caFile = picked.path);
-                          },
-                        ),
-                        if (caFile.isNotEmpty)
-                          TextButton(
-                            onPressed: () => setState(() => caFile = ''),
-                            child: const Text('Use system roots'),
-                          ),
-                      ],
+                    IconButton(
+                      tooltip: 'Remove source',
+                      onPressed: () => setState(() {
+                        files.remove(file);
+                        folders.remove(file);
+                      }),
+                      icon: const Icon(Icons.close, size: 16),
                     ),
                   ],
-                  SwitchListTile(
-                    dense: true,
-                    visualDensity: VisualDensity.compact,
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Server reflection'),
-                    value: reflection,
-                    onChanged: (v) => setState(() => reflection = v),
-                  ),
-                  const Text('Proto sources', style: DeskType.heading),
-                  for (final file in [...files, ...folders])
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SelectableText(
-                            file,
-                            style: DeskType.secondary,
+                ),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    onPressed: () async {
+                      final picked = await openFiles(
+                        acceptedTypeGroups: [
+                          const XTypeGroup(
+                            label: 'Protocol Buffers',
+                            extensions: ['proto'],
                           ),
-                        ),
-                        IconButton(
-                          tooltip: 'Remove source',
-                          onPressed: () => setState(() {
-                            files.remove(file);
-                            folders.remove(file);
-                          }),
-                          icon: const Icon(Icons.close, size: 16),
-                        ),
-                      ],
-                    ),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      TextButton.icon(
-                        onPressed: () async {
-                          final picked = await openFiles(
-                            acceptedTypeGroups: [
-                              const XTypeGroup(
-                                label: 'Protocol Buffers',
-                                extensions: ['proto'],
-                              ),
-                            ],
-                          );
-                          for (final file in picked) {
-                            if (Platform.isMacOS) {
-                              await const MethodChannel(
-                                'dev.apitools.protodesk/storage',
-                              ).invokeMethod<void>('rememberPath', file.path);
-                            }
-                          }
-                          setState(() {
-                            for (final f in picked) {
-                              if (!files.contains(f.path)) files.add(f.path);
-                            }
-                          });
-                        },
-                        icon: const Icon(Icons.note_add_outlined),
-                        label: const Text('Add files'),
-                      ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          final path = await getDirectoryPath();
-                          if (path != null) {
-                            if (Platform.isMacOS) {
-                              await const MethodChannel(
-                                'dev.apitools.protodesk/storage',
-                              ).invokeMethod<void>('rememberPath', path);
-                            }
-                            setState(() {
-                              if (!folders.contains(path)) folders.add(path);
-                            });
-                          }
-                        },
-                        icon: const Icon(Icons.create_new_folder_outlined),
-                        label: const Text('Add folder'),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          setState(() => validation = 'Validating…');
-                          try {
-                            final schema = await desk.engine.loader.load(
-                              files,
-                              folders,
-                            );
-                            setState(
-                              () => validation =
-                                  'Valid · ${schema.files.length} files · ${schema.services.length} services',
-                            );
-                          } catch (e) {
-                            setState(() => validation = e.toString());
-                          }
-                        },
-                        child: const Text('Validate'),
-                      ),
-                    ],
+                        ],
+                      );
+                      if (!mounted) return;
+                      for (final file in picked) {
+                        if (Platform.isMacOS) {
+                          await const MethodChannel(
+                            'dev.apitools.protodesk/storage',
+                          ).invokeMethod<void>('rememberPath', file.path);
+                          if (!mounted) return;
+                        }
+                      }
+                      if (!mounted) return;
+                      setState(() {
+                        for (final f in picked) {
+                          if (!files.contains(f.path)) files.add(f.path);
+                        }
+                      });
+                    },
+                    icon: const Icon(Icons.note_add_outlined),
+                    label: const Text('Add files'),
                   ),
-                  if (validation.isNotEmpty) SelectableText(validation),
+                  TextButton.icon(
+                    onPressed: () async {
+                      final path = await getDirectoryPath();
+                      if (!mounted) return;
+                      if (path != null) {
+                        if (Platform.isMacOS) {
+                          await const MethodChannel(
+                            'dev.apitools.protodesk/storage',
+                          ).invokeMethod<void>('rememberPath', path);
+                        }
+                        if (!mounted) return;
+                        setState(() {
+                          if (!folders.contains(path)) folders.add(path);
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                    label: const Text('Add folder'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      setState(() => validation = 'Validating…');
+                      try {
+                        final schema = await desk.engine.loader.load(
+                          List<String>.of(files),
+                          List<String>.of(folders),
+                        );
+                        if (!mounted) return;
+                        setState(
+                          () => validation =
+                              'Valid · ${schema.files.length} files · ${schema.services.length} services',
+                        );
+                      } catch (e) {
+                        if (!mounted) return;
+                        setState(() => validation = e.toString());
+                      }
+                    },
+                    child: const Text('Validate'),
+                  ),
                 ],
-                if (error != null)
-                  Text(error!, style: const TextStyle(color: Colors.redAccent)),
-              ],
-            ),
-          ),
+              ),
+              if (validation.isNotEmpty) SelectableText(validation),
+            ],
+            if (error != null)
+              Text(error!, style: const TextStyle(color: Colors.redAccent)),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              try {
-                final value = <String, Object?>{
-                  ...?record,
-                  for (final e in fields.entries) e.key: e.value.text,
-                  if (table == 'servers') ...{
-                    'tlsEnabled': tls,
-                    'tlsCaFile': caFile,
-                    'reflectionEnabled': reflection,
-                    'protoFiles': files,
-                    'protoFolders': folders,
-                  },
-                };
-                if (table == 'servers') {
-                  ConnectionConfig(value['address'] as String).endpoint;
-                  DeskController.parseMetadata(value['metadataJson'] as String);
-                }
-                if (table == 'collection_requests') {
-                  jsonDecode(value['requestJson'] as String);
-                  DeskController.parseMetadata(
-                    value['requestMetadataJson'] as String,
-                  );
-                }
-                if (fields['name']!.text.trim().isEmpty) {
-                  throw const FormatException('Name is required');
-                }
-                Navigator.pop(context, value);
-              } catch (e) {
-                setState(() => error = e.toString());
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
       ),
     ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () {
+          try {
+            final value = <String, Object?>{
+              ...?record,
+              for (final e in fields.entries) e.key: e.value.text,
+              if (table == 'servers') ...{
+                'tlsEnabled': tls,
+                'tlsCaFile': caFile,
+                'reflectionEnabled': reflection,
+                'protoFiles': List<String>.of(files),
+                'protoFolders': List<String>.of(folders),
+              },
+            };
+            if (table == 'servers') {
+              ConnectionConfig(value['address'] as String).endpoint;
+              DeskController.parseMetadata(value['metadataJson'] as String);
+            }
+            if (table == 'collection_requests') {
+              jsonDecode(value['requestJson'] as String);
+              DeskController.parseMetadata(
+                value['requestMetadataJson'] as String,
+              );
+            }
+            if (fields['name']!.text.trim().isEmpty) {
+              throw const FormatException('Name is required');
+            }
+            Navigator.pop(context, value);
+          } catch (e) {
+            setState(() => error = e.toString());
+          }
+        },
+        child: const Text('Save'),
+      ),
+    ],
   );
-  for (final field in fields.values) {
-    field.dispose();
-  }
-  return result;
 }
 
 Future<void> showServers(BuildContext context, DeskController desk) async {
@@ -378,51 +410,11 @@ Future<void> saveExample(
     desk.store.save('collections', {'name': 'Personal', 'description': ''});
     desk.refresh();
   }
-  var collection = desk.collections.first['id'] as String;
-  final name = TextEditingController(
-    text: data['methodName'] as String? ?? 'Request',
-  );
-  final accepted = await showDialog<bool>(
+  final selection = await showDialog<Record>(
     context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: const Text('Save request example'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DeskDropdown<String>(
-              value: collection,
-              decoration: const InputDecoration(),
-              items: [
-                for (final c in desk.collections)
-                  DropdownMenuItem(
-                    value: c['id'] as String,
-                    child: Text(c['name'] as String),
-                  ),
-              ],
-              onChanged: (v) => setState(() => collection = v!),
-            ),
-            const SizedBox(height: DeskSpace.panel),
-            TextField(
-              controller: name,
-              decoration: const InputDecoration(labelText: 'Name'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    ),
+    builder: (_) => _SaveExampleDialog(desk: desk, data: data),
   );
-  if (accepted == true) {
+  if (selection != null) {
     desk.store.save('collection_requests', {
       for (final key in [
         'serverId',
@@ -436,12 +428,77 @@ Future<void> saveExample(
         'requestMetadataJson',
       ])
         key: data[key],
-      'collectionId': collection,
-      'name': name.text,
+      ...selection,
     });
     desk.refresh();
   }
-  name.dispose();
+}
+
+class _SaveExampleDialog extends StatefulWidget {
+  final DeskController desk;
+  final Record data;
+  const _SaveExampleDialog({required this.desk, required this.data});
+  @override
+  State<_SaveExampleDialog> createState() => _SaveExampleDialogState();
+}
+
+class _SaveExampleDialogState extends State<_SaveExampleDialog> {
+  late final TextEditingController name;
+  late String collection;
+  @override
+  void initState() {
+    super.initState();
+    collection = widget.desk.collections.first['id'] as String;
+    name = TextEditingController(
+      text: widget.data['methodName'] as String? ?? 'Request',
+    );
+  }
+
+  @override
+  void dispose() {
+    name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Save request example'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DeskDropdown<String>(
+          value: collection,
+          decoration: const InputDecoration(),
+          items: [
+            for (final c in widget.desk.collections)
+              DropdownMenuItem(
+                value: c['id'] as String,
+                child: Text(c['name'] as String),
+              ),
+          ],
+          onChanged: (v) => setState(() => collection = v!),
+        ),
+        const SizedBox(height: DeskSpace.panel),
+        TextField(
+          controller: name,
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, <String, Object?>{
+          'collectionId': collection,
+          'name': name.text,
+        }),
+        child: const Text('Save'),
+      ),
+    ],
+  );
 }
 
 Future<void> showCollections(BuildContext context, DeskController desk) async {
@@ -757,19 +814,21 @@ Future<void> showWorkspace(BuildContext context, DeskController desk) async {
                     ),
                   ],
                 );
-                if (file == null) return;
+                if (!context.mounted || file == null) return;
                 if (await File(file.path).length() > 32 * 1024 * 1024) {
                   throw const FormatException('Workspace exceeds 32 MiB');
                 }
-                final counts = desk.store.importWorkspace(
-                  jsonDecode(await file.readAsString()),
-                );
+                final contents = await file.readAsString();
+                if (!context.mounted) return;
+                final counts = desk.store.importWorkspace(jsonDecode(contents));
                 desk.refresh();
+                if (!context.mounted) return;
                 setState(
                   () => message =
                       'Imported ${counts['serverCount']} servers, ${counts['collectionCount']} collections, ${counts['savedRequestCount']} examples.',
                 );
               } catch (e) {
+                if (!context.mounted) return;
                 setState(() => message = e.toString());
               }
             },
@@ -788,7 +847,7 @@ Future<void> showWorkspace(BuildContext context, DeskController desk) async {
                     ),
                   ],
                 );
-                if (location == null) return;
+                if (!context.mounted || location == null) return;
                 await XFile.fromData(
                   utf8.encode(
                     '${pretty.convert(desk.store.exportWorkspace())}\n',
@@ -798,10 +857,12 @@ Future<void> showWorkspace(BuildContext context, DeskController desk) async {
                 if (!Platform.isWindows) {
                   await Process.run('chmod', ['600', location.path]);
                 }
+                if (!context.mounted) return;
                 setState(
                   () => message = 'Exported workspace to ${location.path}',
                 );
               } catch (e) {
+                if (!context.mounted) return;
                 setState(() => message = e.toString());
               }
             },
