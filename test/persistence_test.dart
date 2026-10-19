@@ -144,7 +144,7 @@ void main() {
       );
       expect(store.list('history_items').length, 1);
       expect(
-        () => store.importWorkspace({...exported, 'version': 2}),
+        () => store.importWorkspace({...exported, 'version': 99}),
         throwsFormatException,
       );
     },

@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import '../transport/engine.dart';
 import '../schema/schema.dart';
 import '../schema/codec.dart';
+import '../sources/manager.dart';
+import '../sources/configuration.dart';
 import '../persistence/store.dart';
 
 const pretty = JsonEncoder.withIndent('  ');
@@ -38,6 +40,7 @@ class DeskController extends ChangeNotifier {
 
   int _generation = 0;
   bool _disposed = false;
+  SourceOperation? sourceOperation;
   DeskController(this.store, this.engine) {
     refresh();
   }
@@ -60,6 +63,48 @@ class DeskController extends ChangeNotifier {
     emit();
   }
 
+  Future<void> browseSources() async {
+    if (server == null || connecting) return;
+    if (connected) await disconnect();
+    final generation = ++_generation;
+    connecting = true;
+    final operation = sourceOperation = SourceOperation(
+      onProgress: (text) {
+        if (generation == _generation) {
+          status = text;
+          emit();
+        }
+      },
+    );
+    status = 'Validating proto sources…';
+    emit();
+    try {
+      final (validation, manifest) = await SourceManager.forWorkspace(
+        engine.loader,
+        store.path,
+      ).validate(SourceConfiguration.fromRecord(server!), operation);
+      if (_disposed || generation != _generation) return;
+      schema = validation.schema;
+      method = method == null ? null : schema.methods[method!.path];
+      server = store.save('servers', {
+        ...server!,
+        'protoSources': manifest.configuration.data,
+      });
+      refresh();
+      status =
+          'Schema ready · ${schema.services.length} services · ${connected ? 'connected' : 'offline; connect to execute RPCs'}';
+    } catch (e) {
+      if (!_disposed && generation == _generation) {
+        status = 'Schema validation failed: $e';
+      }
+    } finally {
+      if (!_disposed && generation == _generation) {
+        connecting = false;
+        emit();
+      }
+    }
+  }
+
   Future<void> connect() async {
     if (server == null) {
       status = 'Create a server profile first';
@@ -69,10 +114,30 @@ class DeskController extends ChangeNotifier {
     final generation = ++_generation;
     connecting = true;
     warning = '';
+    sourceOperation?.cancel();
+    final operation = sourceOperation = SourceOperation();
     status = 'Connecting…';
     emit();
     try {
       final s = server!;
+      Future<SchemaRegistry> compileLocal() async {
+        final config = SourceConfiguration.fromRecord(s);
+        if (config.isEmpty) return SchemaRegistry();
+        final (validation, manifest) = await SourceManager.forWorkspace(
+          engine.loader,
+          store.path,
+        ).validate(config, operation);
+        if (generation != _generation || _disposed) {
+          throw const FormatException('Source discovery cancelled');
+        }
+        schema = validation.schema;
+        server = store.save('servers', {
+          ...s,
+          'protoSources': manifest.configuration.data,
+        });
+        return schema;
+      }
+
       List<int>? certificates;
       final caFile = s['tlsCaFile'] as String? ?? '';
       if (s['tlsEnabled'] == true && caFile.isNotEmpty) {
@@ -94,21 +159,45 @@ class DeskController extends ChangeNotifier {
           tls: s['tlsEnabled'] == true,
           certificates: certificates,
           reflection: s['reflectionEnabled'] != false,
-          files: (s['protoFiles'] as List? ?? []).cast<String>(),
-          folders: (s['protoFolders'] as List? ?? []).cast<String>(),
+          schemaProvider: compileLocal,
           metadata: parseMetadata(s['metadataJson'] as String? ?? '{}'),
         ),
       );
       if (generation != _generation) return;
       schema = discovery.schema;
+      method = method == null ? null : schema.methods[method!.path];
       connected = true;
-      warning = discovery.warning;
+      warning = [
+        warning,
+        discovery.warning,
+      ].where((s) => s.isNotEmpty).join('\n');
       status =
           'Connected · ${discovery.source} · ${schema.services.length} services';
     } catch (e) {
       if (generation == _generation) {
         connected = false;
-        status = 'Connection failed: $e';
+        try {
+          final config = SourceConfiguration.fromRecord(server!);
+          if (!config.isEmpty) {
+            final (validation, manifest) = await SourceManager.forWorkspace(
+              engine.loader,
+              store.path,
+            ).validate(config, operation);
+            if (generation != _generation || _disposed) return;
+            schema = validation.schema;
+            server = store.save('servers', {
+              ...server!,
+              'protoSources': manifest.configuration.data,
+            });
+          }
+        } catch (sourceError) {
+          if (generation == _generation) {
+            warning = 'Schema validation failed: $sourceError';
+          }
+        }
+        if (generation != _generation || _disposed) return;
+        status =
+            'Server transport failed: $e${schema.services.isEmpty ? '' : ' · local schema remains available'}';
       }
     } finally {
       if (generation == _generation) {
@@ -118,7 +207,18 @@ class DeskController extends ChangeNotifier {
     }
   }
 
+  Future<void> cancelDiscovery() async {
+    ++_generation;
+    sourceOperation?.cancel();
+    await engine.disconnect();
+    connected = false;
+    connecting = false;
+    status = 'Discovery cancelled';
+    emit();
+  }
+
   Future<void> disconnect() async {
+    sourceOperation?.cancel();
     ++_generation;
     await engine.disconnect();
     connected = false;
@@ -140,7 +240,8 @@ class DeskController extends ChangeNotifier {
   }
 
   void selectMethod(ProtoMethod selected) {
-    ++_generation;
+    // Offline methods remain selectable while discovery is in progress.
+    if (!connecting) ++_generation;
     engine.cancel();
     invoking = false;
     method = selected;
@@ -459,6 +560,7 @@ class DeskController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    sourceOperation?.cancel();
     callClock.stop();
     ++_generation;
     engine.disconnect();

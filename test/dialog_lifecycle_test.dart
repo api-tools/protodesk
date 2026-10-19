@@ -11,6 +11,7 @@ import 'package:protodesk/src/presentation/design.dart';
 import 'package:protodesk/src/presentation/dialogs.dart';
 import 'package:protodesk/src/schema/proto_loader.dart';
 import 'package:protodesk/src/schema/schema.dart';
+import 'package:protodesk/src/sources/configuration.dart';
 import 'package:protodesk/src/transport/engine.dart';
 
 class PendingLoader extends ProtoLoader {
@@ -19,6 +20,13 @@ class PendingLoader extends ProtoLoader {
   @override
   Future<SchemaRegistry> load(List<String> files, List<String> folders) =>
       completion.future;
+  @override
+  Future<SchemaValidation> validate(
+    List<String> files,
+    List<String> roots, {
+    required SourceOperation operation,
+    List<String> discoverFolders = const [],
+  }) async => SchemaValidation(await completion.future, {}, [], '');
 }
 
 class PendingPicker extends FileSelectorPlatform {
@@ -158,7 +166,10 @@ void main() {
       });
       await tester.enterText(input('name'), 'Edited');
       await closeDialog(tester, 'Save');
-      expect(returned, {...original, 'name': 'Edited'});
+      expect({...returned!}..remove('protoSources'), {
+        ...original,
+        'name': 'Edited',
+      });
     }
   });
 

@@ -15,6 +15,8 @@ class ConnectionConfig {
   final List<String> files, folders;
   final Map<String, String> metadata;
   final List<int>? certificates;
+  final SchemaRegistry? localSchema;
+  final Future<SchemaRegistry> Function()? schemaProvider;
   const ConnectionConfig(
     this.address, {
     this.tls = false,
@@ -23,6 +25,8 @@ class ConnectionConfig {
     this.folders = const [],
     this.metadata = const {},
     this.certificates,
+    this.localSchema,
+    this.schemaProvider,
   });
   (String, int) get endpoint {
     final uri = Uri.tryParse('http://$address');
@@ -259,6 +263,18 @@ class GrpcEngine {
         } catch (e) {
           warning = 'Reflection unavailable: $e';
         }
+      }
+      if (source == 'none' && config.schemaProvider != null) {
+        try {
+          registry = await config.schemaProvider!();
+          source = 'proto';
+        } catch (e) {
+          warning = '$warning\nSchema validation failed: $e'.trim();
+        }
+      }
+      if (source == 'none' && config.localSchema != null) {
+        registry = config.localSchema!;
+        source = 'proto';
       }
       if (source == 'none' &&
           (config.files.isNotEmpty || config.folders.isNotEmpty)) {

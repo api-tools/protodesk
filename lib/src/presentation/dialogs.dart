@@ -9,6 +9,9 @@ import '../persistence/store.dart';
 import '../transport/engine.dart';
 import 'controller.dart';
 import 'design.dart';
+import 'proto_sources.dart';
+import '../sources/configuration.dart';
+import '../sources/manager.dart';
 
 Future<Record?> editRecord(
   BuildContext context,
@@ -42,7 +45,8 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
   late bool tls, reflection;
   late String caFile;
   String? error;
-  String validation = '';
+  late Map<String, Object?> sourceData;
+  String? sourceError;
 
   @override
   void initState() {
@@ -67,6 +71,12 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
     files = (record?['protoFiles'] as List? ?? []).cast<String>().toList();
     folders = (record?['protoFolders'] as List? ?? []).cast<String>().toList();
     caFile = record?['tlsCaFile'] as String? ?? '';
+    try {
+      sourceData = SourceConfiguration.fromRecord(record ?? {}).data;
+    } catch (e) {
+      sourceError = e.toString();
+      sourceData = SourceConfiguration.legacy(files, folders).data;
+    }
   }
 
   @override
@@ -87,7 +97,7 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
           : 'saved request'}',
     ),
     content: SizedBox(
-      width: 620,
+      width: table == 'servers' ? 820 : 620,
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -160,97 +170,23 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                 value: reflection,
                 onChanged: (v) => setState(() => reflection = v),
               ),
-              const Text('Proto sources', style: DeskType.heading),
-              for (final file in [...files, ...folders])
-                Row(
-                  children: [
-                    Expanded(
-                      child: SelectableText(file, style: DeskType.secondary),
-                    ),
-                    IconButton(
-                      tooltip: 'Remove source',
-                      onPressed: () => setState(() {
-                        files.remove(file);
-                        folders.remove(file);
-                      }),
-                      icon: const Icon(Icons.close, size: 16),
-                    ),
-                  ],
+              if (sourceError != null) ...[
+                SelectableText(sourceError!, style: DeskType.secondary),
+                TextButton(
+                  onPressed: () => setState(() => sourceError = null),
+                  child: const Text(
+                    'Replace invalid sources (saved only when you click Save)',
+                  ),
                 ),
-              Wrap(
-                spacing: 8,
-                children: [
-                  TextButton.icon(
-                    onPressed: () async {
-                      final picked = await openFiles(
-                        acceptedTypeGroups: [
-                          const XTypeGroup(
-                            label: 'Protocol Buffers',
-                            extensions: ['proto'],
-                          ),
-                        ],
-                      );
-                      if (!mounted) return;
-                      for (final file in picked) {
-                        if (Platform.isMacOS) {
-                          await const MethodChannel(
-                            'dev.apitools.protodesk/storage',
-                          ).invokeMethod<void>('rememberPath', file.path);
-                          if (!mounted) return;
-                        }
-                      }
-                      if (!mounted) return;
-                      setState(() {
-                        for (final f in picked) {
-                          if (!files.contains(f.path)) files.add(f.path);
-                        }
-                      });
-                    },
-                    icon: const Icon(Icons.note_add_outlined),
-                    label: const Text('Add files'),
+              ] else
+                ProtoSourcesEditor(
+                  initial: sourceData,
+                  manager: SourceManager.forWorkspace(
+                    desk.engine.loader,
+                    desk.store.path,
                   ),
-                  TextButton.icon(
-                    onPressed: () async {
-                      final path = await getDirectoryPath();
-                      if (!mounted) return;
-                      if (path != null) {
-                        if (Platform.isMacOS) {
-                          await const MethodChannel(
-                            'dev.apitools.protodesk/storage',
-                          ).invokeMethod<void>('rememberPath', path);
-                        }
-                        if (!mounted) return;
-                        setState(() {
-                          if (!folders.contains(path)) folders.add(path);
-                        });
-                      }
-                    },
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                    label: const Text('Add folder'),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      setState(() => validation = 'Validating…');
-                      try {
-                        final schema = await desk.engine.loader.load(
-                          List<String>.of(files),
-                          List<String>.of(folders),
-                        );
-                        if (!mounted) return;
-                        setState(
-                          () => validation =
-                              'Valid · ${schema.files.length} files · ${schema.services.length} services',
-                        );
-                      } catch (e) {
-                        if (!mounted) return;
-                        setState(() => validation = e.toString());
-                      }
-                    },
-                    child: const Text('Validate'),
-                  ),
-                ],
-              ),
-              if (validation.isNotEmpty) SelectableText(validation),
+                  onChanged: (value) => sourceData = value,
+                ),
             ],
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.redAccent)),
@@ -273,11 +209,23 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                 'tlsEnabled': tls,
                 'tlsCaFile': caFile,
                 'reflectionEnabled': reflection,
-                'protoFiles': List<String>.of(files),
-                'protoFolders': List<String>.of(folders),
+                'protoSources': SourceConfiguration(sourceData).data,
+                'protoFiles': (sourceData['sources'] as List)
+                    .where((s) => s['type'] == 'file')
+                    .map((s) => s['path'] as String)
+                    .toList(),
+                'protoFolders': (sourceData['sources'] as List)
+                    .where((s) => s['type'] == 'directory')
+                    .map((s) => s['path'] as String)
+                    .toList(),
               },
             };
             if (table == 'servers') {
+              if (sourceError != null) throw FormatException(sourceError!);
+              value.remove('sourceError');
+              value.remove('protoSourcesJson');
+              value.remove('protoFilesJson');
+              value.remove('protoFoldersJson');
               ConnectionConfig(value['address'] as String).endpoint;
               DeskController.parseMetadata(value['metadataJson'] as String);
             }

@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 import 'package:uuid/uuid.dart';
 
+import '../sources/configuration.dart';
+
 typedef Record = Map<String, Object?>;
 
 class WorkspaceStore {
@@ -20,6 +22,7 @@ class WorkspaceStore {
       'reflectionEnabled',
       'protoFilesJson',
       'protoFoldersJson',
+      'protoSourcesJson',
       'metadataJson',
       'createdAt',
       'updatedAt',
@@ -111,6 +114,14 @@ class WorkspaceStore {
               "ALTER TABLE servers ADD COLUMN tls_ca_file TEXT NOT NULL DEFAULT ''",
             );
           }
+          if (table.key == 'servers' &&
+              !database
+                  .select('PRAGMA table_info(servers)')
+                  .any((r) => r['name'] == 'proto_sources_json')) {
+            database.execute(
+              "ALTER TABLE servers ADD COLUMN proto_sources_json TEXT NOT NULL DEFAULT ''",
+            );
+          }
           if (table.value.contains('requestStreamJson')) {
             final existingColumns = database
                 .select('PRAGMA table_info(${table.key})')
@@ -121,6 +132,26 @@ class WorkspaceStore {
                 "ALTER TABLE ${table.key} ADD COLUMN request_stream_json TEXT NOT NULL DEFAULT '[]'",
               );
             }
+          }
+        }
+        for (final row in database.select(
+          "SELECT workspace_id,id,proto_files_json,proto_folders_json FROM servers WHERE proto_sources_json=''",
+        )) {
+          try {
+            final config = SourceConfiguration.legacy(
+              SourceConfiguration.strings(
+                jsonDecode(row['proto_files_json'] as String),
+              ),
+              SourceConfiguration.strings(
+                jsonDecode(row['proto_folders_json'] as String),
+              ),
+            );
+            database.execute(
+              'UPDATE servers SET proto_sources_json=? WHERE workspace_id=? AND id=?',
+              [jsonEncode(config.data), row['workspace_id'], row['id']],
+            );
+          } catch (_) {
+            /* Keep malformed legacy JSON intact for recovery. */
           }
         }
       });
@@ -164,17 +195,35 @@ class WorkspaceStore {
       for (final key in ['tlsEnabled', 'reflectionEnabled']) {
         record[key] = record[key] == 1;
       }
+      final errors = <String>[];
       for (final key in ['protoFiles', 'protoFolders']) {
+        final raw = record['${key}Json'] as String;
         try {
-          record[key] = (jsonDecode(
-            record.remove('${key}Json') as String,
-          ) as List).cast<String>();
+          record[key] = SourceConfiguration.strings(jsonDecode(raw));
+          record.remove('${key}Json');
         } catch (_) {
-          throw FormatException(
-            'Saved server ${record['name']} has invalid $key. Restore its backup or repair the source list.',
+          record[key] = <String>[];
+          errors.add(
+            'Saved $key is malformed. Original data is preserved; repair this source configuration.',
           );
         }
       }
+      final raw = record['protoSourcesJson'] as String;
+      try {
+        final config = raw.isEmpty
+            ? SourceConfiguration.legacy(
+                (record['protoFiles'] as List).cast<String>(),
+                (record['protoFolders'] as List).cast<String>(),
+              )
+            : SourceConfiguration(
+                Map<String, Object?>.from(jsonDecode(raw) as Map),
+              );
+        record['protoSources'] = config.data;
+        record.remove('protoSourcesJson');
+      } catch (e) {
+        errors.add('Saved proto sources require repair: $e');
+      }
+      if (errors.isNotEmpty) record['sourceError'] = errors.join('\n');
     }
     if (table == 'collections') {
       record['requests'] = list('collection_requests')
@@ -266,6 +315,27 @@ class WorkspaceStore {
           (record['address'] as String).contains('://')) {
         throw const FormatException('Server address must be host:port');
       }
+      for (final key in ['protoFiles', 'protoFolders']) {
+        if (record[key] == null && record['${key}Json'] != null) {
+          record[key] = SourceConfiguration.strings(
+            jsonDecode(record['${key}Json'] as String),
+          );
+        }
+      }
+      if (record['protoSources'] == null &&
+          (record['protoSourcesJson'] as String? ?? '').isNotEmpty) {
+        record['protoSources'] = SourceConfiguration(
+          Map<String, Object?>.from(
+            jsonDecode(record['protoSourcesJson'] as String) as Map,
+          ),
+        ).data;
+      }
+      if (record['sourceError'] != null) {
+        throw const FormatException(
+          'Repair the saved proto source configuration before saving. Original data remains intact.',
+        );
+      }
+      record['protoSources'] = SourceConfiguration.fromRecord(record).data;
       final metadata = jsonDecode(record['metadataJson'] as String? ?? '{}');
       if (metadata is! Map || metadata.values.any((v) => v is! String)) {
         throw const FormatException(
@@ -279,6 +349,7 @@ class WorkspaceStore {
     }
     final keys = ['workspaceId', 'id', ...columns[table]!];
     final values = keys.map((key) {
+      if (key == 'protoSourcesJson') return jsonEncode(record['protoSources']);
       if (key == 'protoFilesJson' || key == 'protoFoldersJson') {
         return jsonEncode(record[key.substring(0, key.length - 4)] ?? []);
       }
@@ -312,7 +383,7 @@ class WorkspaceStore {
       db.execute('DELETE FROM history_items WHERE workspace_id=?', ['local']);
   Record exportWorkspace() => {
     'kind': 'protodesk.workspace',
-    'version': 1,
+    'version': 2,
     'workspaceId': 'local',
     'exportedAt': DateTime.now().toUtc().toIso8601String(),
     'servers': list('servers'),
@@ -321,9 +392,9 @@ class WorkspaceStore {
   Record importWorkspace(Object? input) {
     if (input is! Map ||
         input['kind'] != 'protodesk.workspace' ||
-        input['version'] != 1) {
+        ![1, 2].contains(input['version'])) {
       throw const FormatException(
-        'Not a supported ProtoDesk workspace (version 1 required)',
+        'Not a supported ProtoDesk workspace (version 1 or 2 required)',
       );
     }
     final servers = input['servers'];
@@ -338,6 +409,7 @@ class WorkspaceStore {
       var count = 0;
       for (final server in servers) {
         final data = Map<String, Object?>.from(server as Map);
+        _checkImportFields('servers', data);
         final old = data.remove('id');
         data.remove('createdAt');
         data.remove('updatedAt');
@@ -347,6 +419,7 @@ class WorkspaceStore {
       }
       for (final collection in collections) {
         final data = Map<String, Object?>.from(collection as Map);
+        _checkImportFields('collections', data);
         data.remove('id');
         data.remove('createdAt');
         data.remove('updatedAt');
@@ -358,6 +431,7 @@ class WorkspaceStore {
             ..remove('id')
             ..remove('createdAt')
             ..remove('updatedAt');
+          _checkImportFields('collection_requests', item);
           item['collectionId'] = saved['id'];
           item['serverId'] = ids[item['serverId']] ?? item['serverId'];
           save('collection_requests', item);
@@ -370,6 +444,29 @@ class WorkspaceStore {
         'savedRequestCount': count,
       };
     });
+  }
+
+  void _checkImportFields(String table, Record record) {
+    final supported = {
+      'id',
+      'workspaceId',
+      ...columns[table]!,
+      if (table == 'servers') ...[
+        'protoFiles',
+        'protoFolders',
+        'protoSources',
+        'sourceError',
+      ],
+      if (table == 'collections') 'requests',
+    };
+    final unknown = record.keys
+        .where((key) => !supported.contains(key))
+        .toList();
+    if (unknown.isNotEmpty) {
+      throw FormatException(
+        'Unsupported workspace fields in $table: ${unknown.join(', ')}. Import aborted without discarding data.',
+      );
+    }
   }
 
   void _check(String table) {

@@ -1,5 +1,6 @@
 import 'dart:ui' show AppExitResponse;
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -14,6 +15,9 @@ import 'src/presentation/controller.dart';
 import 'src/presentation/design.dart';
 export 'src/presentation/design.dart' show deskTheme;
 import 'src/presentation/workspace.dart';
+import 'src/sources/configuration.dart';
+import 'src/sources/manager.dart';
+import 'src/sources/git_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,6 +69,35 @@ Future<void> main() async {
         ? await const MethodChannel('dev.apitools.protodesk/storage')
               .invokeMethod<String>('dataPath')
         : WorkspaceStore.defaultPath();
+    final sourceSmoke = Platform.environment['PROTODESK_SMOKE_SOURCES'];
+    if (sourceSmoke != null) {
+      final loader = ProtoLoader(
+        compiler: compiler,
+        standardRoot: p.join(directory.path, 'include'),
+      );
+      final manager = SourceManager(
+        loader,
+        RepositoryCache(
+          Directory(p.join(p.dirname(dataPath!), 'schema-cache')),
+          provider:
+              Platform.environment['PROTODESK_SMOKE_SOURCES_OFFLINE'] == '1'
+              ? _OfflineSourceProvider()
+              : null,
+        ),
+      );
+      final config = SourceConfiguration(
+        Map<String, Object?>.from(jsonDecode(sourceSmoke) as Map),
+      );
+      final (validation, manifest) = await manager.validate(
+        config,
+        SourceOperation(),
+      );
+      stdout.writeln(
+        'SOURCE_SMOKE_RESULT=${jsonEncode({'configuration': manifest.configuration.data, 'validation': validation.metadata})}',
+      );
+      await directory.delete(recursive: true);
+      exit(0);
+    }
     final smokeEndpoint = Platform.environment['PROTODESK_SMOKE_ENDPOINT'];
     if (smokeEndpoint != null) {
       await releaseSmoke(
@@ -112,7 +145,8 @@ Future<void> main() async {
     }
     runApp(ProtoDeskApp(desk: desk, tools: directory));
   } catch (e) {
-    if (Platform.environment.containsKey('PROTODESK_SMOKE_ENDPOINT') ||
+    if (Platform.environment.containsKey('PROTODESK_SMOKE_SOURCES') ||
+        Platform.environment.containsKey('PROTODESK_SMOKE_ENDPOINT') ||
         Platform.environment['PROTODESK_SMOKE_FRESH'] == '1') {
       stderr.writeln('Release smoke failed: $e');
       exit(1);
@@ -172,4 +206,22 @@ class _ProtoDeskAppState extends State<ProtoDeskApp>
     theme: deskTheme,
     home: DeskWorkspace(desk: widget.desk),
   );
+}
+
+class _OfflineSourceProvider implements RepositoryProvider {
+  @override
+  Future<String> resolve(
+    String url,
+    String reference,
+    SourceOperation operation,
+  ) async =>
+      throw const FormatException('Network disabled for offline cache check');
+  @override
+  Future<void> fetch(
+    String url,
+    String commit,
+    Directory destination,
+    SourceOperation operation,
+  ) async =>
+      throw const FormatException('Network disabled for offline cache check');
 }

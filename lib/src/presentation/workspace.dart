@@ -172,7 +172,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                     const SizedBox(width: DeskSpace.gap),
                     FilledButton(
                       onPressed: desk.connecting
-                          ? null
+                          ? desk.cancelDiscovery
                           : desk.connected
                           ? desk.disconnect
                           : desk.connect,
@@ -186,7 +186,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                           const SizedBox(width: DeskSpace.gap),
                           Text(
                             desk.connecting
-                                ? 'Connecting…'
+                                ? 'Cancel'
                                 : desk.connected
                                 ? 'Disconnect'
                                 : 'Connect',
@@ -333,6 +333,13 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
     Column(
       children: [
         title('SERVICES'),
+        TextButton.icon(
+          onPressed: desk.server == null || desk.connecting
+              ? null
+              : desk.browseSources,
+          icon: const Icon(Icons.schema_outlined, size: 16),
+          label: const Text('Browse proto sources'),
+        ),
         Padding(
           padding: const EdgeInsets.all(DeskSpace.inset),
           child: TextField(
@@ -354,7 +361,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                           ? 'No services found. Enable reflection or configure proto sources in Servers.'
                           : desk.servers.isEmpty
                           ? 'Add a server in Servers to discover its APIs.'
-                          : 'Connect to a server to discover its APIs.',
+                          : 'Connect or browse configured proto sources offline.',
                       style: DeskType.body.copyWith(color: Colors.grey),
                     ),
                   ),

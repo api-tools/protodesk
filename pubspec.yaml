@@ -41,6 +41,8 @@ dependencies:
   path: ^1.9.1
   file_selector: ^1.1.0
   uuid: ^4.6.0
+  archive: ^4.5.2
+  crypto: ^3.0.7
 
 # grpc 5.1 constrains http2 to 2.x; 3.1 preserves its transport API and
 # fixes late headers after cancellation. Covered by transport and release tests.
