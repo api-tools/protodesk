@@ -4,8 +4,8 @@ Source: [issue #15](https://github.com/api-tools/protodesk/issues/15). Verified 
 
 ## Progress evidence
 
-- Phase 0: documentation aligned locally; workspace transfer wording corrected.
-- Phase 1: implementation in progress.
+- Phase 0: implemented on the enterprise-connections branch; production/development downloads, signing status and workspace v2 transfer wording aligned.
+- Phase 1: implemented locally; additive profile fields, PEM mTLS, explicit SNI and reflection-header inheritance. Full local suite passed (142 tests), analyzer and 12 packaging regressions passed. Native macOS mTLS reflection/RPC and minimum-window profile controls verified with isolated data. Review and cross-platform CI are pending; native picker completion was not claimed because another desktop workflow took input focus. See CONNECTION_SECURITY.md and test/mtls_test.dart.
 - Phases 2–6: planned; not implemented or validated yet.
 - Owner private endpoint: not tested.
 

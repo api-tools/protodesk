@@ -133,6 +133,10 @@ void main() {
                     'address': 'localhost:50051',
                     'tlsEnabled': true,
                     'tlsCaFile': '/selected/test-ca.pem',
+                    'tlsClientCertificateFile': '/selected/client.pem',
+                    'tlsClientKeyFile': '/selected/client-key.pem',
+                    'tlsServerName': 'service.example',
+                    'reflectionMetadataJson': '{}',
                   });
                 },
                 child: const Text('Edit profile'),
@@ -153,6 +157,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(result!['tlsCaFile'], '');
       expect(result!['tlsEnabled'], true);
+      expect(result!['tlsClientCertificateFile'], '/selected/client.pem');
+      expect(result!['tlsClientKeyFile'], '/selected/client-key.pem');
+      expect(result!['tlsServerName'], 'service.example');
+      expect(result!['reflectionMetadataJson'], '{}');
       await tester.pumpWidget(const SizedBox());
       desk.dispose();
       directory.deleteSync(recursive: true);

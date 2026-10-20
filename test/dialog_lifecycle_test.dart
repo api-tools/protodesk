@@ -130,6 +130,10 @@ void main() {
           'address': 'example.invalid:443',
           'tlsEnabled': true,
           'tlsCaFile': '/chosen/ca.pem',
+          'tlsClientCertificateFile': '',
+          'tlsClientKeyFile': '',
+          'tlsServerName': '',
+          'reflectionMetadataJson': '',
           'protoFiles': ['a.proto'],
           'protoFolders': ['protos'],
           'reflectionEnabled': false,
@@ -302,7 +306,15 @@ void main() {
     });
   }
 
-  for (final kind in ['ca', 'files', 'folder', 'import', 'export']) {
+  for (final kind in [
+    'ca',
+    'client certificate',
+    'client private key',
+    'files',
+    'folder',
+    'import',
+    'export',
+  ]) {
     testWidgets(
       'late $kind picker completion does not update an unmounted dialog',
       (tester) async {
@@ -322,6 +334,8 @@ void main() {
         });
         final action = {
           'ca': 'Choose CA certificate',
+          'client certificate': 'Choose client certificate',
+          'client private key': 'Choose client private key',
           'files': 'Add files',
           'folder': 'Add folder',
           'import': 'Import',
@@ -332,6 +346,8 @@ void main() {
         await tester.pump();
         await closeDialog(tester, workspace ? 'Close' : 'Cancel');
         switch (kind) {
+          case 'client certificate':
+          case 'client private key':
           case 'ca':
           case 'import':
             picker.file.complete(XFile('/does/not/exist'));
@@ -355,7 +371,13 @@ void main() {
       },
     );
   }
-  for (final kind in ['ca', 'files', 'folder']) {
+  for (final kind in [
+    'ca',
+    'client certificate',
+    'client private key',
+    'files',
+    'folder',
+  ]) {
     testWidgets('late $kind bookmark completion cannot update disposed state', (
       tester,
     ) async {
@@ -376,12 +398,16 @@ void main() {
       });
       final action = {
         'ca': 'Choose CA certificate',
+        'client certificate': 'Choose client certificate',
+        'client private key': 'Choose client private key',
         'files': 'Add files',
         'folder': 'Add folder',
       }[kind]!;
       await tester.ensureVisible(find.text(action));
       await tester.tap(find.text(action));
       switch (kind) {
+        case 'client certificate':
+        case 'client private key':
         case 'ca':
           picker.file.complete(XFile('/selected/ca.pem'));
           break;

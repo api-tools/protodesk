@@ -19,6 +19,10 @@ class WorkspaceStore {
       'address',
       'tlsEnabled',
       'tlsCaFile',
+      'tlsClientCertificateFile',
+      'tlsClientKeyFile',
+      'tlsServerName',
+      'reflectionMetadataJson',
       'reflectionEnabled',
       'protoFilesJson',
       'protoFoldersJson',
@@ -106,6 +110,24 @@ class WorkspaceStore {
           database.execute(
             'CREATE TABLE IF NOT EXISTS ${table.key} (workspace_id TEXT NOT NULL, id TEXT NOT NULL, ${declarations.join(', ')}, PRIMARY KEY(workspace_id,id)${table.key == 'collection_requests' ? ', FOREIGN KEY(workspace_id,collection_id) REFERENCES collections(workspace_id,id) ON DELETE CASCADE' : ''})',
           );
+          if (table.key == 'servers') {
+            final existing = database
+                .select('PRAGMA table_info(servers)')
+                .map((r) => r['name'])
+                .toSet();
+            for (final name in [
+              'tls_client_certificate_file',
+              'tls_client_key_file',
+              'tls_server_name',
+              'reflection_metadata_json',
+            ]) {
+              if (!existing.contains(name)) {
+                database.execute(
+                  "ALTER TABLE servers ADD COLUMN $name TEXT NOT NULL DEFAULT ''",
+                );
+              }
+            }
+          }
           if (table.key == 'servers' &&
               !database
                   .select('PRAGMA table_info(servers)')
@@ -336,6 +358,35 @@ class WorkspaceStore {
         );
       }
       record['protoSources'] = SourceConfiguration.fromRecord(record).data;
+      for (final key in [
+        'tlsClientCertificateFile',
+        'tlsClientKeyFile',
+        'tlsServerName',
+      ]) {
+        final text = record[key] as String? ?? '';
+        if (text.contains('-----BEGIN') ||
+            text.contains('\n') ||
+            text.contains('\r') ||
+            text.contains('\x00') ||
+            text.length > 8192) {
+          throw const FormatException(
+            'TLS settings must contain file references or a server name, never PEM contents',
+          );
+        }
+      }
+      final reflection = (record['reflectionMetadataJson'] as String? ?? '')
+          .trim();
+      record['reflectionMetadataJson'] = reflection;
+      if (reflection.isNotEmpty) {
+        final decoded = jsonDecode(reflection);
+        if (decoded is! Map ||
+            decoded.keys.any((k) => k is! String) ||
+            decoded.values.any((v) => v is! String)) {
+          throw const FormatException(
+            'Reflection metadata must be an object of strings, or empty to inherit RPC metadata',
+          );
+        }
+      }
       final metadata = jsonDecode(record['metadataJson'] as String? ?? '{}');
       if (metadata is! Map || metadata.values.any((v) => v is! String)) {
         throw const FormatException(
