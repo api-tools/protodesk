@@ -34,6 +34,7 @@ void main() {
     void Function(Object?) observe,
   ) async {
     var value = initial;
+    var present = true;
     await tester.pumpWidget(
       MaterialApp(
         theme: deskTheme,
@@ -44,9 +45,13 @@ void main() {
                 field: f,
                 schema: schema,
                 value: value,
+                present: present,
                 onChanged: (v) {
                   observe(v);
-                  setState(() => value = v);
+                  setState(() {
+                    present = !identical(v, unsetFieldValue);
+                    value = present ? v : null;
+                  });
                 },
               ),
             ),
@@ -56,6 +61,69 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('empty strings can be present and explicitly unset', (
+    tester,
+  ) async {
+    Object? changed;
+    await mount(
+      tester,
+      const ProtoField(
+        name: 'text',
+        jsonName: 'text',
+        number: 1,
+        type: 9,
+        optional: true,
+      ),
+      'filled',
+      (v) => changed = v,
+    );
+    await tester.enterText(find.byType(TextField), '');
+    expect(changed, '');
+    await tester.tap(find.byTooltip('Unset field'));
+    expect(identical(changed, unsetFieldValue), true);
+  });
+
+  testWidgets('an untouched child can be explicitly present but empty', (
+    tester,
+  ) async {
+    Object? changed;
+    final f = schema.messages['editor.fixture.Editors']!.fields.firstWhere(
+      (f) => f.name == 'child',
+    );
+    await mount(tester, f, null, (v) => changed = v);
+    await tester.tap(find.byTooltip('Set empty message').first);
+    expect(changed, <String, Object?>{});
+    expect(
+      ProtoCodec(schema).encode('editor.fixture.Editors', {'child': changed}),
+      [10, 0],
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unset').first);
+    expect(identical(changed, unsetFieldValue), true);
+  });
+
+  testWidgets('NullValue has separate set-null and unset actions', (
+    tester,
+  ) async {
+    Object? changed = 'unchanged';
+    await mount(
+      tester,
+      const ProtoField(
+        name: 'nil',
+        jsonName: 'nil',
+        number: 1,
+        type: 14,
+        typeName: 'google.protobuf.NullValue',
+      ),
+      null,
+      (v) => changed = v,
+    );
+    await tester.tap(find.text('Set null'));
+    expect(changed, isNull);
+    await tester.tap(find.text('Unset'));
+    expect(identical(changed, unsetFieldValue), true);
+  });
 
   testWidgets('string well-known fields show editable unquoted values', (
     tester,
@@ -181,6 +249,9 @@ void main() {
         await mount(tester, f, null, (v) => changed = v);
         if (f.typeName == 'google.protobuf.BoolValue') {
           await tester.tap(find.byType(Checkbox));
+          await tester.pump();
+        } else if (f.typeName == 'google.protobuf.Empty') {
+          await tester.tap(find.byTooltip('Set empty message'));
           await tester.pump();
         } else {
           final input =
@@ -330,4 +401,122 @@ void main() {
       expect(changed, value);
     },
   );
+  testWidgets('setting an empty message clears invalid nested drafts', (
+    tester,
+  ) async {
+    final f = schema.messages['editor.fixture.Editors']!.fields.firstWhere(
+      (f) => f.name == 'child',
+    );
+    final form = GlobalKey<FormState>();
+    var value = <String, Object?>{};
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: deskTheme,
+        home: Scaffold(
+          body: Form(
+            key: form,
+            child: StatefulBuilder(
+              builder: (context, setState) => FieldEditor(
+                field: f,
+                schema: schema,
+                value: value,
+                onChanged: (v) =>
+                    setState(() => value = Map<String, Object?>.from(v as Map)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final count = find.descendant(
+      of: find.byWidgetPredicate(
+        (w) => w is FieldEditor && w.field.name == 'count',
+      ),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(count, 'invalid');
+    await tester.pump();
+    expect(form.currentState!.validate(), false);
+    await tester.tap(find.byTooltip('Set empty message').first);
+    await tester.pumpAndSettle();
+    expect(value, isEmpty);
+    expect(form.currentState!.validate(), true);
+    expect(tester.widget<TextField>(count).controller!.text, '');
+  });
+  testWidgets('empty strings and wrappers can be set directly from unset', (
+    tester,
+  ) async {
+    final fields = [
+      const ProtoField(
+        name: 'optional',
+        jsonName: 'optional',
+        number: 1,
+        type: 9,
+        optional: true,
+      ),
+      ...schema.messages['editor.fixture.Editors']!.fields.where(
+        (f) => ['string_value', 'bytes_value'].contains(f.name),
+      ),
+    ];
+    for (final f in fields) {
+      await tester.pumpWidget(const SizedBox());
+      Object? changed = unsetFieldValue;
+      await mount(tester, f, null, (v) => changed = v);
+      await tester.tap(find.byTooltip('Set empty value'));
+      await tester.pumpAndSettle();
+      expect(changed, '');
+      await tester.tap(find.byTooltip('Unset field'));
+      await tester.pumpAndSettle();
+      expect(identical(changed, unsetFieldValue), true);
+    }
+  });
+  testWidgets(
+    'NullValue presence controls wrap in a narrow repeated-item pane',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: deskTheme,
+          home: Scaffold(
+            body: SizedBox(
+              width: 150,
+              child: FieldEditor(
+                field: const ProtoField(
+                  name: 'nil',
+                  jsonName: 'nil',
+                  number: 1,
+                  type: 14,
+                  typeName: 'google.protobuf.NullValue',
+                ),
+                schema: schema,
+                value: null,
+                onChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+  test('Any preserves ordinary Empty and special wrapper/Value presence', () {
+    final codec = ProtoCodec(schema);
+    for (final json in [
+      {'@type': 'type.googleapis.com/google.protobuf.Empty'},
+      {'@type': 'type.googleapis.com/google.protobuf.StringValue', 'value': ''},
+      {'@type': 'type.googleapis.com/google.protobuf.Value', 'value': null},
+      {
+        '@type': 'type.googleapis.com/google.protobuf.Any',
+        'value': {'@type': 'type.googleapis.com/google.protobuf.Empty'},
+      },
+    ]) {
+      expect(
+        codec.decode(
+          'google.protobuf.Any',
+          codec.encode('google.protobuf.Any', json),
+        ),
+        json,
+      );
+    }
+  });
 }
