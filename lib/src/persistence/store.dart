@@ -11,6 +11,7 @@ import '../security/credentials.dart';
 import '../security/redaction.dart';
 import '../sources/configuration.dart';
 import '../workflow/storage.dart';
+import '../workflow/preparation.dart';
 
 typedef Record = Map<String, Object?>;
 
@@ -28,6 +29,7 @@ class WorkspaceStore {
       'tlsClientKeyFile',
       'tlsServerName',
       'httpAuthority',
+      'requestProfilesJson',
       'reflectionMetadataJson',
       'metadataReferencesJson',
       'reflectionMetadataReferencesJson',
@@ -139,6 +141,7 @@ class WorkspaceStore {
             'reflectionMetadataReferencesJson',
             'requestCredentialReferencesJson',
             'requestOptionsJson',
+            'requestProfilesJson',
           ]) {
             if (table.value.contains(key) &&
                 !existingReferenceColumns.contains(snake(key))) {
@@ -387,6 +390,23 @@ class WorkspaceStore {
         throw const FormatException('Server name and address are required');
       }
       parseServerAddress(record['address'] as String);
+      final preparation = record['requestProfilesJson'];
+      if (preparation != null && preparation is! String) {
+        throw const FormatException(
+          'Preparation definitions must be an encoded JSON string',
+        );
+      }
+      final previousPreparation = input['id'] == null
+          ? null
+          : db.select(
+              'SELECT request_profiles_json FROM servers WHERE workspace_id=? AND id=?',
+              ['local', input['id']],
+            ).firstOrNull?['request_profiles_json'];
+      // Unrelated profile/cache edits preserve an unsupported saved definition.
+      if (preparation != previousPreparation) {
+        PreparationProfiles.decode(preparation as String?);
+      }
+
       validateGrpcAuthority(record['httpAuthority'] as String? ?? '');
       for (final key in ['protoFiles', 'protoFolders']) {
         if (record[key] == null && record['${key}Json'] != null) {
@@ -456,6 +476,14 @@ class WorkspaceStore {
   void delete(String table, String id) {
     _check(table);
     transaction(() {
+      if (table == 'servers') {
+        for (final auxiliary in ['request_drafts', 'request_templates']) {
+          db.execute(
+            'DELETE FROM $auxiliary WHERE workspace_id=? AND server_id=?',
+            ['local', id],
+          );
+        }
+      }
       if (table == 'collections') {
         db.execute(
           'DELETE FROM collection_requests WHERE workspace_id=? AND collection_id=?',
@@ -527,8 +555,14 @@ class WorkspaceStore {
           'Source extensions cannot be safely redacted. Review their contents and explicitly include sensitive literals to export them.',
         );
       }
+      final sanitized = {
+        ...item,
+        'requestProfilesJson': PreparationProfiles.decode(
+          item['requestProfilesJson'] as String?,
+        ).safeExport(),
+      };
       return exportMetadata(
-        exportMetadata(item, 'metadataJson', 'metadataReferencesJson'),
+        exportMetadata(sanitized, 'metadataJson', 'metadataReferencesJson'),
         'reflectionMetadataJson',
         'reflectionMetadataReferencesJson',
       );

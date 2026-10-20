@@ -1,8 +1,12 @@
 import 'dart:io';
+import 'dart:convert';
 
 import '../persistence/store.dart';
 import '../request_options.dart';
 import '../schema/proto_loader.dart';
+import '../schema/codec.dart';
+import '../workflow/preparation.dart';
+import '../workflow/preparation_storage.dart';
 import '../security/catalog.dart';
 import '../security/credentials.dart';
 import '../sources/configuration.dart';
@@ -107,12 +111,83 @@ Future<void> smokeCommands(
         throw StateError('Compiled command persistence lost options');
       }
     }
+    final definitions = PreparationProfiles({
+      'version': 1,
+      'environments': [
+        {
+          'id': 'compiled',
+          'name': 'Compiled fixture',
+          'variables': {
+            'empty': {'bound': true, 'value': ''},
+            'nil': {'bound': true, 'value': null},
+          },
+        },
+      ],
+      'presets': [],
+    });
+    final prepared = await prepareRequestInWorker(
+      definitions: definitions.encode(),
+      body: r'{"value":"${empty}"}',
+      metadata: '{}',
+      references: '',
+      environmentId: 'compiled',
+    );
+    final codec = ProtoCodec(schema);
+    final decoded = codec.decode(
+      method.input,
+      codec.encode(method.input, jsonDecode(prepared.body)),
+    ) as Map;
+    if (!decoded.containsKey('value') || decoded['value'] != '') {
+      throw StateError(
+        'Compiled preparation lost optional empty-string presence',
+      );
+    }
+    final nullValue = await prepareRequestInWorker(
+      definitions: definitions.encode(),
+      body: r'"${nil}"',
+      metadata: '{}',
+      references: '',
+      environmentId: 'compiled',
+    );
+    if (nullValue.body != 'null') {
+      throw StateError('Compiled preparation lost explicit null');
+    }
+    final record = store.list('servers').first;
+    store.save('servers', {
+      ...record,
+      'requestProfilesJson': definitions.encode(),
+    });
+    final sourceTemplate = PreparationTemplate(
+      r'{"value":"${empty}"}',
+      '{}',
+      '',
+    );
+    PreparationTemplateStore(store)
+        .save(record['id'] as String, method.path, sourceTemplate);
+    if (PreparationTemplateStore(store)
+            .load(record['id'] as String, method.path)!
+            .encode() !=
+        sourceTemplate.encode()) {
+      throw StateError('Compiled reusable template persistence failed');
+    }
+    final exportedProfiles = PreparationProfiles.decode(
+      ((store.exportWorkspace()['servers'] as List).firstWhere(
+            (s) => (s as Map)['id'] == record['id'],
+          ) as Map)['requestProfilesJson']
+          as String,
+    );
+    final exportedVariables =
+        exportedProfiles.environments.single['variables'] as Map;
+    if ((exportedVariables['empty'] as Map)['bound'] != false ||
+        (exportedVariables['nil'] as Map).containsKey('value')) {
+      throw StateError('Compiled preparation safe export lost unbound state');
+    }
     if (store.list('history_items').isNotEmpty ||
         store.list('credentials').isNotEmpty) {
       throw StateError('Command check invoked or created credentials');
     }
     stdout.writeln(
-      'COMMAND_SMOKE: PASS (AOT isolate, bundled compiler, POSIX/PowerShell round trips, optional empty value, persisted authority/deadline, zero network/credential use)',
+      'COMMAND_SMOKE: PASS (AOT isolate, bundled compiler, POSIX/PowerShell round trips, optional empty value, persisted authority/deadline, environment/preset worker, zero network/credential use)',
     );
   } finally {
     credentials.dispose();

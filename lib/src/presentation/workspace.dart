@@ -13,6 +13,7 @@ import 'response_tree.dart';
 import 'design.dart';
 import 'call_status.dart';
 import 'grpcurl.dart';
+import 'preparation.dart';
 import 'diagnostics.dart';
 
 class DeskWorkspace extends StatefulWidget {
@@ -270,6 +271,11 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       () => showWorkspace(context, desk),
                     ),
                     IconButton(
+                      tooltip: 'Environments & metadata presets',
+                      icon: const Icon(Icons.tune, size: 18),
+                      onPressed: () => showRequestPreparation(context, desk),
+                    ),
+                    IconButton(
                       tooltip: 'grpcurl import / export',
                       icon: const Icon(Icons.terminal, size: 18),
                       onPressed: () => showGrpcurl(context, desk),
@@ -287,7 +293,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                     ),
                   ],
                 );
-                if (bounds.maxWidth < 1120) {
+                if (bounds.maxWidth < 1440) {
                   return Column(
                     children: [
                       Align(alignment: Alignment.centerLeft, child: connection),

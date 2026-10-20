@@ -10,6 +10,9 @@ void initializeWorkflowStorage(Database db) {
     'CREATE TABLE IF NOT EXISTS request_drafts (workspace_id TEXT NOT NULL, server_id TEXT NOT NULL, full_method TEXT NOT NULL, state_json TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(workspace_id,server_id,full_method))',
   );
   db.execute(
+    'CREATE TABLE IF NOT EXISTS request_templates (workspace_id TEXT NOT NULL, server_id TEXT NOT NULL, full_method TEXT NOT NULL, state_json TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(workspace_id,server_id,full_method))',
+  );
+  db.execute(
     'CREATE INDEX IF NOT EXISTS history_page ON history_items(workspace_id,created_at DESC,id DESC)',
   );
   db.execute(
