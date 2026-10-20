@@ -13,6 +13,7 @@ import 'response_tree.dart';
 import 'design.dart';
 import 'call_status.dart';
 import 'grpcurl.dart';
+import 'diagnostics.dart';
 
 class DeskWorkspace extends StatefulWidget {
   final DeskController desk;
@@ -892,6 +893,11 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              IconButton(
+                tooltip: 'Call diagnostics',
+                onPressed: () => showCallDiagnostics(context, desk),
+                icon: const Icon(Icons.timeline, size: 16),
+              ),
               IconButton(
                 tooltip: 'Response headers and trailers',
                 onPressed: () => showResponseMetadata(context, desk.result),

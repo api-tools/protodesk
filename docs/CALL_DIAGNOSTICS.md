@@ -1,0 +1,13 @@
+# Call diagnostics
+
+The response toolbar's timeline icon opens an optional secondary surface. It keeps the existing compact footer and JSON response layout unchanged. Invoke normally; inspect the trace during or after the call. A new call replaces the previous trace, while partial observations remain available when that call fails, times out or is cancelled. Traces are session observations, not a persistent payload log.
+
+Each trace records UTC timestamps and monotonic elapsed microseconds, sent/received message counts, time to first response and total runtime duration. Sent events count serialized messages handed to the gRPC runtime, not acknowledgements from the server. Byte totals are **serialized protobuf bytes**; framing, compression, TLS and actual network traffic are not measured. First-response time is absent when no response message arrives. Timing starts at invocation in the runtime, after credential resolution; it does not measure Connect/reflection.
+
+Explicit half-close and cancellation events record the user's request, not acknowledgement by the remote endpoint. Server-side termination never invents a half-close request. The trace retains at most 2048 events, preserves its starting context and terminal event, and reports omitted events; totals continue counting all observed messages, including bytes received before a buffer-limit or decoding failure. Existing message/queue/resource limits remain active. There are no automatic retries.
+
+Default diagnostic copies contain event kinds, timestamps, counters and status code only: no request/response payloads, metadata values, endpoint, error text or OS credentials. Structured errors require a separate **Include structured status details** choice; changing to a new trace resets that choice. This opt-in data can contain sensitive server messages and raw detail bytes.
+
+`grpc-status-details-bin` is preserved in response trailers. When `google.rpc.Status` is already present in the loaded descriptor registry, its code/message and individual locally known detail types are decoded. Unknown or malformed `Any` entries retain raw base64. No descriptors are fetched. Decoding is bounded to 256 KiB and 64 detail entries; oversized or malformed trailers remain available unchanged through response metadata. This feature does not silently mutate raw status/trailers or discard unknown details.
+
+Verification covers actual local unary/server/client/bidirectional calls, partial failures, cancellation, deadlines, invalid input, no synthetic half-close on early termination, exact serialized byte totals, event bounds, unknown/malformed structured details and a compact 1000 × 650 dialog. Compiled four-mode release smoke also checks trace completion and counters.

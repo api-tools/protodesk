@@ -1,3 +1,5 @@
+import 'package:protodesk/src/transport/diagnostics.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -44,6 +46,7 @@ class ObservedEngine extends GrpcEngine {
     String authority = '',
     void Function(Object?)? onMessage,
     void Function(Map<String, String>)? onHeaders,
+    void Function(CallDiagnostics)? onDiagnostics,
   }) {
     lastAuthority = authority;
     lastTimeout = timeoutMs;

@@ -1,3 +1,4 @@
+import 'diagnostics.dart';
 import '../endpoint.dart';
 
 import 'dart:async';
@@ -123,14 +124,16 @@ class CallResult {
   final String code, error;
   final int durationMs;
   final Map<String, String> headers, trailers;
+  final CallDiagnostics? diagnostics;
   const CallResult(
     this.messages,
     this.code,
     this.error,
     this.durationMs,
     this.headers,
-    this.trailers,
-  );
+    this.trailers, {
+    this.diagnostics,
+  });
 }
 
 class DynamicClient extends Client {
@@ -177,7 +180,8 @@ class RequestStreamCall {
   int get sentCount => _sentCount;
   int get queuedCount => _queuedCount;
   int get queuedBytes => _queuedBytes;
-  RequestStreamCall._(this.codec, this.method);
+  final CallDiagnostics diagnostics;
+  RequestStreamCall._(this.codec, this.method, this.diagnostics);
   Stream<List<int>> get requests => _requests.stream.map((bytes) {
     _queuedCount--;
     _queuedBytes -= bytes.length;
@@ -239,6 +243,7 @@ class RequestStreamCall {
   }
 
   void finishSending() {
+    diagnostics.event('half_close_requested');
     if (_inputClosed) return;
     _inputClosed = true;
     _wakeSender();
@@ -249,7 +254,9 @@ class RequestStreamCall {
 
   void _complete() {
     _completed = true;
-    finishSending();
+    _inputClosed = true;
+    _wakeSender();
+    unawaited(_requests.close());
   }
 }
 
@@ -259,6 +266,7 @@ class GrpcEngine {
   ConnectionConfig? _config;
   SchemaRegistry schema = SchemaRegistry();
   final _calls = <ResponseStream<List<int>>>{};
+  final _diagnostics = <ResponseStream<List<int>>, CallDiagnostics>{};
   final _outgoing = <RequestStreamCall>{};
   int _generation = 0;
   GrpcEngine(this.loader);
@@ -268,6 +276,7 @@ class GrpcEngine {
       outgoing._complete();
     }
     for (final call in _calls.toList()) {
+      _diagnostics[call]?.event('cancel_requested');
       await call.cancel();
     }
     _calls.clear();
@@ -451,8 +460,36 @@ class GrpcEngine {
     String authority = '',
     void Function(Object? message)? onMessage,
     void Function(Map<String, String> headers)? onHeaders,
+    void Function(CallDiagnostics diagnostics)? onDiagnostics,
   }) async {
-    final clock = Stopwatch()..start();
+    final trace = CallDiagnostics();
+    onDiagnostics?.call(trace);
+    CallResult failed(String code, String message) {
+      trace.complete(code);
+      return CallResult(
+        [],
+        code,
+        message,
+        trace.elapsedUs ~/ 1000,
+        {},
+        {},
+        diagnostics: trace,
+      );
+    }
+
+    if (_channel == null || _config == null) {
+      return failed('FAILED_PRECONDITION', 'No server connected');
+    }
+    List<int> bytes;
+    try {
+      bytes = ProtoCodec(schema).encode(method.input, body);
+    } catch (e) {
+      return failed('INVALID_ARGUMENT', e.toString());
+    }
+    if (method.clientStreaming &&
+        bytes.length > RequestStreamLimits.queuedBytes) {
+      return failed('RESOURCE_EXHAUSTED', 'Message exceeds 32 MiB send queue');
+    }
     if (method.clientStreaming) {
       try {
         final stream = startRequestStream(
@@ -462,12 +499,14 @@ class GrpcEngine {
           authority: authority,
           onMessage: onMessage,
           onHeaders: onHeaders,
+          diagnostics: trace,
         );
         try {
           stream.send(body);
           stream.finishSending();
         } catch (_) {
           await cancel();
+          await stream.result;
           rethrow;
         }
         return await stream.result;
@@ -475,43 +514,13 @@ class GrpcEngine {
         final grpc = e is GrpcError
             ? e
             : GrpcError.invalidArgument(e.toString());
-        return CallResult(
-          [],
-          _code(grpc.code),
-          grpc.message ?? '',
-          clock.elapsedMilliseconds,
-          {},
-          {},
-        );
+        return failed(_code(grpc.code), grpc.message ?? '');
       }
-    }
-    if (_channel == null || _config == null) {
-      return const CallResult(
-        [],
-        'FAILED_PRECONDITION',
-        'No server connected',
-        0,
-        {},
-        {},
-      );
-    }
-    final codec = ProtoCodec(schema);
-    List<int> bytes;
-    try {
-      bytes = codec.encode(method.input, body);
-    } catch (e) {
-      return CallResult(
-        [],
-        'INVALID_ARGUMENT',
-        e.toString(),
-        clock.elapsedMilliseconds,
-        {},
-        {},
-      );
     }
     return _invokeEncoded(
       method,
       Stream.value(bytes),
+      diagnostics: trace,
       metadata: metadata,
       timeoutMs: timeoutMs,
       authority: authority,
@@ -522,11 +531,13 @@ class GrpcEngine {
 
   RequestStreamCall startRequestStream(
     ProtoMethod method, {
+    CallDiagnostics? diagnostics,
     Map<String, String> metadata = const {},
     int timeoutMs = 5000,
     String authority = '',
     void Function(Object? message)? onMessage,
     void Function(Map<String, String> headers)? onHeaders,
+    void Function(CallDiagnostics diagnostics)? onDiagnostics,
   }) {
     if (!method.clientStreaming) {
       throw const GrpcError.invalidArgument('Method has no streaming request');
@@ -534,17 +545,20 @@ class GrpcEngine {
     if (_channel == null || _config == null) {
       throw const GrpcError.failedPrecondition('No server connected');
     }
-    final stream = RequestStreamCall._(ProtoCodec(schema), method);
+    final trace = diagnostics ?? CallDiagnostics();
+    final stream = RequestStreamCall._(ProtoCodec(schema), method, trace);
     _outgoing.add(stream);
     stream.result =
         _invokeEncoded(
           method,
           stream.requests,
+          diagnostics: trace,
           metadata: metadata,
           timeoutMs: timeoutMs,
           authority: authority,
           onMessage: onMessage,
           onHeaders: onHeaders,
+          onDiagnostics: onDiagnostics,
         ).whenComplete(() {
           stream._complete();
           _outgoing.remove(stream);
@@ -555,12 +569,16 @@ class GrpcEngine {
   Future<CallResult> _invokeEncoded(
     ProtoMethod method,
     Stream<List<int>> requests, {
+    CallDiagnostics? diagnostics,
     required Map<String, String> metadata,
     required int timeoutMs,
     required String authority,
     void Function(Object? message)? onMessage,
     void Function(Map<String, String> headers)? onHeaders,
+    void Function(CallDiagnostics diagnostics)? onDiagnostics,
   }) async {
+    final trace = diagnostics ?? CallDiagnostics();
+    onDiagnostics?.call(trace);
     final clock = Stopwatch()..start();
     final codec = ProtoCodec(schema);
     final messages = <Object?>[];
@@ -569,21 +587,38 @@ class GrpcEngine {
     final channel = temporary ?? _channel!;
     final call = DynamicClient(channel).stream(
       method.path,
-      requests,
+      requests
+          .map((bytes) {
+            trace.event('sent', bytes.length);
+            return bytes;
+          })
+          .transform(
+            StreamTransformer.fromHandlers(
+              handleDone: (sink) {
+                if (!method.clientStreaming) {
+                  trace.event('half_close_requested');
+                }
+                sink.close();
+              },
+            ),
+          ),
       CallOptions(
         timeout: Duration(milliseconds: timeoutMs > 0 ? timeoutMs : 5000),
         metadata: {..._config!.metadata, ...metadata},
       ),
     );
     _calls.add(call);
+    _diagnostics[call] = trace;
     var code = 'OK', error = '';
     var bufferedBytes = 0;
     final headerFuture = call.headers.then((v) {
+      trace.event('headers_received');
       headers.addAll(v);
       onHeaders?.call(Map.unmodifiable(headers));
     }, onError: (Object _) {});
     try {
       await for (final data in call) {
+        trace.event('received', data.length);
         bufferedBytes += data.length;
         if (bufferedBytes > 64 * 1024 * 1024) {
           throw const GrpcError.resourceExhausted(
@@ -615,8 +650,10 @@ class GrpcEngine {
       } catch (_) {}
       await call.cancel();
       _calls.remove(call);
+      _diagnostics.remove(call);
       await temporary?.shutdown();
     }
+    trace.complete(code);
     return CallResult(
       messages,
       code,
@@ -624,11 +661,13 @@ class GrpcEngine {
       clock.elapsedMilliseconds,
       headers,
       trailers,
+      diagnostics: trace,
     );
   }
 
   Future<void> cancel() async {
     for (final c in _calls.toList()) {
+      _diagnostics[c]?.event('cancel_requested');
       await c.cancel();
     }
   }
