@@ -18,6 +18,7 @@ void expectEmpty(DeskController desk) {
     expect(desk.store.list(table), isEmpty, reason: table);
   }
   expect(desk.store.db.select('SELECT * FROM request_drafts'), isEmpty);
+  expect(desk.store.db.select('SELECT * FROM request_templates'), isEmpty);
   expect(desk.server, isNull);
   expect(desk.connected, isFalse);
   expect(desk.connecting, isFalse);

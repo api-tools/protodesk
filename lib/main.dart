@@ -147,10 +147,10 @@ Future<void> main() async {
             throw StateError('Fresh startup populated $table');
           }
         }
-        if (store.db
-            .select('SELECT 1 FROM request_drafts LIMIT 1')
-            .isNotEmpty) {
-          throw StateError('Fresh startup populated request drafts');
+        for (final table in ['request_drafts', 'request_templates']) {
+          if (store.db.select('SELECT 1 FROM $table LIMIT 1').isNotEmpty) {
+            throw StateError('Fresh startup populated working state');
+          }
         }
         if (desk.server != null ||
             desk.connected ||

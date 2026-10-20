@@ -62,7 +62,16 @@ class _FieldEditorState extends State<FieldEditor>
     text = TextEditingController(text: _text(widget.value));
   }
 
-  String _text(Object? v, {bool? present}) => jsonInput
+  bool rawShape(Object? value) =>
+      value != null &&
+      (field.repeated
+          ? (map ? value is! Map : value is! List)
+          : structured
+          ? value is! Map
+          : (scalarType == 8 && value is! bool) ||
+                (scalarType == 14 && value is String && value.contains(r'${')));
+
+  String _text(Object? v, {bool? present}) => jsonInput || rawShape(v)
       ? pretty.convert(
           v ??
               (field.typeName == 'google.protobuf.Value' &&
@@ -138,6 +147,42 @@ class _FieldEditorState extends State<FieldEditor>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    // A valid JSON template can contain a string placeholder for a typed
+    // boolean/container. Preserve it visibly instead of casting or showing an
+    // empty container, and let preparation or explicit JSON editing repair it.
+    if (rawShape(widget.value)) {
+      return TextFormField(
+        controller: text,
+        minLines: 1,
+        maxLines: 4,
+        style: DeskType.code,
+        decoration: InputDecoration(
+          labelText: 'Raw JSON value',
+          errorText:
+              error ??
+              'Prepare variables or enter a value of the expected type.',
+          contentPadding: const EdgeInsets.all(DeskSpace.inset),
+        ),
+        // Model placeholders are already preserved JSON, so switching to JSON
+        // loses nothing. Only transient invalid edits block that transition;
+        // whole-message validation still blocks an unresolved RPC invocation.
+        validator: (_) => error,
+        onChanged: (raw) {
+          try {
+            final value = jsonDecode(raw);
+            if (value is! String || !value.contains(r'${')) {
+              ProtoCodec(widget.schema).validateField(field, value);
+            }
+            setState(() => error = null);
+            update(value);
+          } catch (_) {
+            setState(
+              () => error = 'Value does not match this field. Original JSON is preserved.',
+            );
+          }
+        },
+      );
+    }
     if (field.repeated && !map) {
       final values = widget.value is List
           ? List<Object?>.from(widget.value as List)
