@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../schema/proto_loader.dart';
+import '../workflow/storage.dart';
 import '../persistence/store.dart';
 import 'engine.dart';
 
@@ -141,6 +142,32 @@ Future<void> releaseSmoke(
       'requestJson': '{}',
       'responseJson': '{}',
     });
+    DraftStore(store).save(
+      saved['id'] as String,
+      uploadMethod.path,
+      RequestDraft(
+        body: '{"text":"unsent"}',
+        metadata: '{}',
+        references: '',
+        authority: '',
+        timeoutMs: 1250,
+        signature: 'compiled-fixture',
+        queue: [
+          {'text': 'queued'},
+        ],
+        lastSent: [
+          {'text': 'sent'},
+        ],
+      ),
+    );
+    final page = queryHistory(
+      store,
+      filter: const HistoryFilter(status: 'OK'),
+      limit: 1,
+    );
+    if (page.rows.length != 1 || page.hasNext) {
+      throw StateError('Compiled history query failed');
+    }
     final safe = store.exportWorkspace();
     final safeCollection = (safe['collections'] as List).single as Map;
     final safeRequest = (safeCollection['requests'] as List).single as Map;
@@ -157,6 +184,15 @@ Future<void> releaseSmoke(
     store.close();
     store = WorkspaceStore.open(database);
     try {
+      final draft = DraftStore(store)
+          .load(saved['id'] as String, uploadMethod.path);
+      if (draft == null ||
+          draft.body != '{"text":"unsent"}' ||
+          draft.queue.length != 1 ||
+          draft.lastSent.length != 1 ||
+          draft.timeoutMs != 1250) {
+        throw StateError('Compiled draft restart check failed');
+      }
       if (store.list('servers').length != 2 ||
           store.list('collection_requests').length != 2 ||
           store.list('history_items').length != 1 ||
@@ -186,6 +222,7 @@ Future<void> releaseSmoke(
         'receivedBeforeHalfClose': true,
         'persistence': 'PASS',
         'diagnostics': 'PASS',
+        'draftsAndHistoryQuery': 'PASS',
         'nativeDataPath': nativeDataPath == null ? 'not applicable' : 'PASS',
       }),
     );

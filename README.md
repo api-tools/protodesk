@@ -69,3 +69,5 @@ macOS retains the app sandbox. Its compiler helper inherits the sandbox, network
 Application code: [MIT](LICENSE). Fonts, protobuf tools, Flutter, and other dependencies retain their respective licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Call timelines and serialized protobuf metrics are documented in [Call diagnostics](docs/CALL_DIAGNOSTICS.md).
+
+Restore per-method drafts and sent sequences, browse filtered/paginated history, and use guarded application shortcuts: [request workflow](docs/REQUEST_WORKFLOW.md).

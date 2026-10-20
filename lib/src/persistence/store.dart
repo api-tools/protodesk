@@ -5,11 +5,12 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 import 'package:uuid/uuid.dart';
 
-import '../sources/configuration.dart';
-import '../security/credentials.dart';
-import '../security/redaction.dart';
 import '../endpoint.dart';
 import '../request_options.dart';
+import '../security/credentials.dart';
+import '../security/redaction.dart';
+import '../sources/configuration.dart';
+import '../workflow/storage.dart';
 
 typedef Record = Map<String, Object?>;
 
@@ -193,6 +194,7 @@ class WorkspaceStore {
             }
           }
         }
+        initializeWorkflowStorage(database);
         for (final row in database.select(
           "SELECT workspace_id,id,proto_files_json,proto_folders_json FROM servers WHERE proto_sources_json=''",
         )) {

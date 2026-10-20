@@ -147,6 +147,11 @@ Future<void> main() async {
             throw StateError('Fresh startup populated $table');
           }
         }
+        if (store.db
+            .select('SELECT 1 FROM request_drafts LIMIT 1')
+            .isNotEmpty) {
+          throw StateError('Fresh startup populated request drafts');
+        }
         if (desk.server != null ||
             desk.connected ||
             desk.connecting ||
@@ -208,9 +213,15 @@ class _ProtoDeskAppState extends State<ProtoDeskApp>
 
   @override
   Future<AppExitResponse> didRequestAppExit() async {
+    widget.desk.persistDraft();
     await widget.desk.engine.disconnect();
     widget.tools?.delete(recursive: true);
     return AppExitResponse.exit;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) widget.desk.persistDraft();
   }
 
   @override
