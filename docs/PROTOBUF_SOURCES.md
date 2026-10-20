@@ -39,7 +39,7 @@ No periodic background refresh runs. Fetching happens only during explicit disco
 
 ## Connectivity
 
-**Browse proto sources** in the Services panel validates and loads schemas offline. You can inspect services/methods and edit requests without reflection, TLS negotiation or server authentication. RPC execution remains disabled until Connect succeeds. Connection discovery continues to prefer reflection; if reflection fails, configured sources supply the schema. If transport fails, valid configured definitions remain available for browsing. Reflection, compiler and transport failures retain distinct labels. Cancel in the connection toolbar cancels discovery.
+Use **Validate** in Servers → Create/Edit server → Proto sources to compile schemas and inspect discovered services/methods without contacting the endpoint. Save the configuration, then use **Connect** to load services into the workspace. Connection discovery prefers reflection; if reflection fails, configured sources supply the schema. If transport fails, valid configured definitions remain available for browsing and request editing, while RPC execution stays disabled. Reflection, compiler and transport failures retain distinct labels. Cancel in the connection toolbar cancels discovery.
 
 ## Persistence and recovery
 
@@ -61,7 +61,7 @@ Use your existing database or an isolated absolute directory under `~/Library/Ap
 1. Create a server with an offline endpoint such as `127.0.0.1:1`. Add several local files in two picker operations; verify they append and can be removed individually.
 2. Add a directory with nested service/common files. Discover, expand results, select only service entries, add the project proto root using Add import root, and Validate. Check methods, counts and root resolution. Add a missing import and verify its compiler location/root suggestion; correct it and revalidate.
 3. Add `https://github.com/grpc/grpc-proto`, reference `master`, Proto directory `grpc/reflection/v1`, leave Git roots blank (repository root). Discover and select `reflection.proto`; Validate and Save. This public fixture was verified by the opt-in acquisition smoke check; repository size/resource bounds apply. Alternatively use a smaller public company schema repository.
-4. Close/reopen the app. Verify local bookmarks, selections and commit persisted. Disconnect the network and Browse proto sources. Confirm the cached schema remains browsable and Invoke is disabled for the offline server.
+4. Close/reopen the app. Verify local bookmarks, selections and commit persisted. Disconnect the network and Validate in the server editor to inspect the cached schema offline. Save, then Connect to the offline server. Confirm the workspace retains the cached services after the transport error and Invoke is disabled.
 5. Reconnect networking, Refresh a branch-based source, then retry with an invalid reference. Confirm the previous successful source remains available when you cancel edits. Cancel discovery while it is running, and close dialogs during pending file selection/validation; no framework assertion should occur.
 6. Export/import a workspace and confirm every source, root and selection survives. Confirm version-1 workspace import still works. Inspect narrower windows and long paths; the server editor scrolls without stacking additional source dialogs.
 

@@ -333,13 +333,6 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
     Column(
       children: [
         title('SERVICES'),
-        TextButton.icon(
-          onPressed: desk.server == null || desk.connecting
-              ? null
-              : desk.browseSources,
-          icon: const Icon(Icons.schema_outlined, size: 16),
-          label: const Text('Browse proto sources'),
-        ),
         Padding(
           padding: const EdgeInsets.all(DeskSpace.inset),
           child: TextField(
@@ -361,7 +354,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                           ? 'No services found. Enable reflection or configure proto sources in Servers.'
                           : desk.servers.isEmpty
                           ? 'Add a server in Servers to discover its APIs.'
-                          : 'Connect or browse configured proto sources offline.',
+                          : 'Connect to discover APIs using reflection or configured proto sources.',
                       style: DeskType.body.copyWith(color: Colors.grey),
                     ),
                   ),
