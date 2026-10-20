@@ -37,6 +37,7 @@ class _ReleaseAvailabilityState extends State<ReleaseAvailability> {
     final operation = widget.checkFactory?.call() ?? ReleaseCheck();
     setState(() {
       active = operation;
+      release = null;
       message = '';
     });
     try {

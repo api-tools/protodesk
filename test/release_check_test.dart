@@ -315,6 +315,61 @@ void main() {
     },
   );
   testWidgets(
+    'failed and cancelled retries never display a prior successful release as current',
+    (tester) async {
+      final pending = Completer<HttpClientResponse>();
+      final clients = [
+        client(),
+        client(500),
+        client(),
+        Client(Request(pending.future)),
+      ];
+      var next = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ReleaseAvailability(
+                checkFactory: () =>
+                    ReleaseCheck(clientFactory: () => clients[next++]),
+              ),
+            ),
+          ),
+        ),
+      );
+      Future<void> check() async {
+        await tester.ensureVisible(find.text('Check for updates'));
+        await tester.tap(find.text('Check for updates'));
+        await tester.pumpAndSettle();
+      }
+
+      await check();
+      expect(find.text('Latest stable: v1.0.14'), findsOneWidget);
+      await check();
+      expect(
+        find.textContaining('official release service is unavailable'),
+        findsOneWidget,
+      );
+      expect(find.text('Latest stable: v1.0.14'), findsNothing);
+      expect(find.text('Official release page'), findsNothing);
+      await check();
+      expect(find.text('Latest stable: v1.0.14'), findsOneWidget);
+      await tester.ensureVisible(find.text('Check for updates'));
+      await tester.tap(find.text('Check for updates'));
+      await tester.pump();
+      expect(find.text('Latest stable: v1.0.14'), findsNothing);
+      expect(find.text('Official release page'), findsNothing);
+      await tester.tap(find.text('Cancel check'));
+      await tester.pumpAndSettle();
+      expect(find.text('Release check cancelled.'), findsOneWidget);
+      expect(find.text('Latest stable: v1.0.14'), findsNothing);
+      pending.complete(Response(Stream.value(encoded(fixture()))));
+      await tester.pumpAndSettle();
+      expect(find.text('Latest stable: v1.0.14'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
     'cancel and dispose discard late results without setState after unmount',
     (tester) async {
       final response = Completer<HttpClientResponse>();
