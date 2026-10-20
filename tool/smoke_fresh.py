@@ -22,6 +22,6 @@ with tempfile.TemporaryDirectory(prefix='protodesk-fresh-release-', dir=parent) 
     for _ in range(2):
         subprocess.run([str(executable)], env=settings, check=True, timeout=45)
         with closing(sqlite3.connect(str(Path(directory) / 'protodesk.sqlite'))) as db:
-            for table in ('servers', 'collections', 'collection_requests', 'history_items'):
+            for table in ('servers', 'collections', 'collection_requests', 'history_items', 'credentials'):
                 assert db.execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0, table
     print('Packaged fresh startup/restart and persisted empty tables: PASS')

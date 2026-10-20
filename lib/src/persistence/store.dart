@@ -6,6 +6,8 @@ import 'package:sqlite3/sqlite3.dart';
 import 'package:uuid/uuid.dart';
 
 import '../sources/configuration.dart';
+import '../security/credentials.dart';
+import '../security/redaction.dart';
 
 typedef Record = Map<String, Object?>;
 
@@ -23,6 +25,8 @@ class WorkspaceStore {
       'tlsClientKeyFile',
       'tlsServerName',
       'reflectionMetadataJson',
+      'metadataReferencesJson',
+      'reflectionMetadataReferencesJson',
       'reflectionEnabled',
       'protoFilesJson',
       'protoFoldersJson',
@@ -41,12 +45,21 @@ class WorkspaceStore {
       'requestJson',
       'requestStreamJson',
       'requestMetadataJson',
+      'requestCredentialReferencesJson',
       'responseJson',
       'statusCode',
       'statusMessage',
       'durationMs',
       'error',
       'createdAt',
+    ],
+    'credentials': [
+      'name',
+      'kind',
+      'scopeJson',
+      'state',
+      'createdAt',
+      'updatedAt',
     ],
     'collections': ['name', 'description', 'createdAt', 'updatedAt'],
     'collection_requests': [
@@ -61,6 +74,7 @@ class WorkspaceStore {
       'requestJson',
       'requestStreamJson',
       'requestMetadataJson',
+      'requestCredentialReferencesJson',
       'createdAt',
       'updatedAt',
     ],
@@ -110,6 +124,22 @@ class WorkspaceStore {
           database.execute(
             'CREATE TABLE IF NOT EXISTS ${table.key} (workspace_id TEXT NOT NULL, id TEXT NOT NULL, ${declarations.join(', ')}, PRIMARY KEY(workspace_id,id)${table.key == 'collection_requests' ? ', FOREIGN KEY(workspace_id,collection_id) REFERENCES collections(workspace_id,id) ON DELETE CASCADE' : ''})',
           );
+          final existingReferenceColumns = database
+              .select('PRAGMA table_info(${table.key})')
+              .map((r) => r['name'])
+              .toSet();
+          for (final key in [
+            'metadataReferencesJson',
+            'reflectionMetadataReferencesJson',
+            'requestCredentialReferencesJson',
+          ]) {
+            if (table.value.contains(key) &&
+                !existingReferenceColumns.contains(snake(key))) {
+              database.execute(
+                "ALTER TABLE ${table.key} ADD COLUMN ${snake(key)} TEXT NOT NULL DEFAULT ''",
+              );
+            }
+          }
           if (table.key == 'servers') {
             final existing = database
                 .select('PRAGMA table_info(servers)')
@@ -293,7 +323,9 @@ class WorkspaceStore {
         record[key] = value.isEmpty
             ? (key == 'requestStreamJson' ? '[]' : '{}')
             : value;
-        final decoded = jsonDecode(record[key] as String);
+        final decoded = key.toLowerCase().endsWith('metadatajson')
+            ? parseLiteralMetadata(record[key] as String)
+            : jsonDecode(record[key] as String);
         if (key == 'requestStreamJson' &&
             (decoded is! List ||
                 decoded.length > 1000 ||
@@ -302,6 +334,21 @@ class WorkspaceStore {
             'Streaming requests must be an array of at most 1000 messages / 64 MiB',
           );
         }
+      }
+    }
+    for (final key in [
+      'metadataReferencesJson',
+      'reflectionMetadataReferencesJson',
+      'requestCredentialReferencesJson',
+    ]) {
+      if (columns[table]!.contains(key)) {
+        MetadataReferences.decode(record[key] as String?);
+      }
+    }
+    if (table == 'credentials') {
+      CredentialScope.decode(jsonDecode(record['scopeJson'] as String));
+      if (!['pending', 'ready', 'unavailable'].contains(record['state'])) {
+        throw CredentialFailure.invalid;
       }
     }
     if (table == 'history_items' &&
@@ -378,21 +425,9 @@ class WorkspaceStore {
           .trim();
       record['reflectionMetadataJson'] = reflection;
       if (reflection.isNotEmpty) {
-        final decoded = jsonDecode(reflection);
-        if (decoded is! Map ||
-            decoded.keys.any((k) => k is! String) ||
-            decoded.values.any((v) => v is! String)) {
-          throw const FormatException(
-            'Reflection metadata must be an object of strings, or empty to inherit RPC metadata',
-          );
-        }
+        parseLiteralMetadata(reflection);
       }
-      final metadata = jsonDecode(record['metadataJson'] as String? ?? '{}');
-      if (metadata is! Map || metadata.values.any((v) => v is! String)) {
-        throw const FormatException(
-          'Server metadata must be an object of strings',
-        );
-      }
+      parseLiteralMetadata(record['metadataJson'] as String? ?? '{}');
     }
     if ((table == 'collections' || table == 'collection_requests') &&
         (record['name'] ?? '').toString().trim().isEmpty) {
@@ -432,14 +467,92 @@ class WorkspaceStore {
 
   void clearHistory() =>
       db.execute('DELETE FROM history_items WHERE workspace_id=?', ['local']);
-  Record exportWorkspace() => {
-    'kind': 'protodesk.workspace',
-    'version': 2,
-    'workspaceId': 'local',
-    'exportedAt': DateTime.now().toUtc().toIso8601String(),
-    'servers': list('servers'),
-    'collections': list('collections'),
-  };
+
+  /// Safe by default. OS credential values are never read for an export.
+  /// Full literal/body inclusion is an explicit user choice, not migration.
+  Record exportWorkspace({
+    bool includeSensitiveLiterals = false,
+    bool includeRequestBodies = false,
+  }) {
+    Record request(Record item) {
+      var result = {...item};
+      if (!includeSensitiveLiterals) {
+        result = exportMetadata(
+          result,
+          'requestMetadataJson',
+          'requestCredentialReferencesJson',
+        );
+      }
+      if (!includeRequestBodies) {
+        result['requestJson'] = '{}';
+        result['requestStreamJson'] = '[]';
+      }
+      return result;
+    }
+
+    Record server(Record item) {
+      if (includeSensitiveLiterals) return item;
+      final source = SourceConfiguration.fromRecord(item);
+      // Unknown extension data may contain credentials. Preserve it only with
+      // explicit inclusion rather than guessing which fields are sensitive.
+      const configKeys = {
+        'version',
+        'sources',
+        'importRoots',
+        'validation',
+        'validationStale',
+      };
+      const sourceKeys = {
+        'id',
+        'type',
+        'path',
+        'url',
+        'ref',
+        'directory',
+        'roots',
+        'entries',
+        'commit',
+        'cachedAt',
+        'credentialRef',
+      };
+      if (source.data.keys.any((k) => !configKeys.contains(k)) ||
+          source.sources.any(
+            (s) => s.keys.any((k) => !sourceKeys.contains(k)),
+          )) {
+        throw const FormatException(
+          'Source extensions cannot be safely redacted. Review their contents and explicitly include sensitive literals to export them.',
+        );
+      }
+      return exportMetadata(
+        exportMetadata(item, 'metadataJson', 'metadataReferencesJson'),
+        'reflectionMetadataJson',
+        'reflectionMetadataReferencesJson',
+      );
+    }
+
+    return {
+      'kind': 'protodesk.workspace',
+      'version': 2,
+      'workspaceId': 'local',
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'exportPolicy': {
+        'sensitiveLiteralsIncluded': includeSensitiveLiterals,
+        'requestBodiesIncluded': includeRequestBodies,
+      },
+      'servers': list('servers').map(server).toList(),
+      'collections': list('collections')
+          .map(
+            (c) => {
+              ...c,
+              'requests': (c['requests'] as List)
+                  .map((r) => request(Map<String, Object?>.from(r as Map)))
+                  .toList(),
+            },
+          )
+          .toList(),
+    };
+  }
+
   Record importWorkspace(Object? input) {
     if (input is! Map ||
         input['kind'] != 'protodesk.workspace' ||

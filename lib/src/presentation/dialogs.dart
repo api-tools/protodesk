@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import '../persistence/store.dart';
 import '../transport/engine.dart';
 import 'controller.dart';
+import 'credentials.dart';
+import '../security/credentials.dart';
 import 'design.dart';
 import 'proto_sources.dart';
 import '../sources/configuration.dart';
@@ -46,7 +48,10 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
   late String caFile, clientCertificateFile, clientKeyFile;
   String? error;
   late Map<String, Object?> sourceData;
-  String? sourceError;
+  String? sourceError, credentialError;
+  late MetadataReferences rpcCredentials,
+      reflectionCredentials,
+      savedRequestCredentials;
 
   @override
   void initState() {
@@ -74,6 +79,22 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                   : ''),
         ),
     };
+    try {
+      savedRequestCredentials = MetadataReferences.decode(
+        record?['requestCredentialReferencesJson'] as String?,
+      );
+      rpcCredentials = MetadataReferences.decode(
+        record?['metadataReferencesJson'] as String?,
+      );
+      reflectionCredentials = MetadataReferences.decode(
+        record?['reflectionMetadataReferencesJson'] as String?,
+      );
+    } catch (_) {
+      credentialError = 'Invalid protected header references. Existing saved data remains intact; explicitly replace these references to repair the profile.';
+      savedRequestCredentials = MetadataReferences({});
+      rpcCredentials = MetadataReferences({});
+      reflectionCredentials = MetadataReferences({});
+    }
     tls = record?['tlsEnabled'] == true;
     reflection = record?['reflectionEnabled'] != false;
     files = (record?['protoFiles'] as List? ?? []).cast<String>().toList();
@@ -190,7 +211,66 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                   maxLines: key.endsWith('Json') ? 5 : 1,
                 ),
               ),
+            if (credentialError != null) ...[
+              Text(credentialError!, style: DeskType.secondary),
+              TextButton(
+                onPressed: () => setState(() => credentialError = null),
+                child: const Text(
+                  'Replace invalid protected references on Save',
+                ),
+              ),
+            ],
             if (table == 'servers') ...[
+              for (final reflectionHeaders in [false, true])
+                MetadataCredentialEditor(
+                  desk: desk,
+                  title: reflectionHeaders
+                      ? 'Protected reflection headers'
+                      : 'Protected RPC headers',
+                  scope: () => DeskController.credentialScope({
+                    'address': fields['address']!.text,
+                    'tlsEnabled': tls,
+                    'tlsServerName': fields['tlsServerName']!.text,
+                    'tlsCaFile': caFile,
+                  }),
+                  references: reflectionHeaders
+                      ? reflectionCredentials
+                      : rpcCredentials,
+                  onChanged: (value) => setState(() {
+                    if (reflectionHeaders) {
+                      reflectionCredentials = value;
+                    } else {
+                      rpcCredentials = value;
+                    }
+                  }),
+                  literals: () => DeskController.parseMetadata(
+                    fields[reflectionHeaders
+                                ? 'reflectionMetadataJson'
+                                : 'metadataJson']!
+                            .text
+                            .trim()
+                            .isEmpty
+                        ? '{}'
+                        : fields[reflectionHeaders
+                                  ? 'reflectionMetadataJson'
+                                  : 'metadataJson']!
+                              .text,
+                  ),
+                  onLiteralsChanged: (value) =>
+                      fields[reflectionHeaders
+                              ? 'reflectionMetadataJson'
+                              : 'metadataJson']!
+                          .text = pretty.convert(
+                        value,
+                      ),
+                ),
+              TextButton(
+                onPressed: () async {
+                  await manageCredentials(context, desk);
+                  if (mounted) setState(() {});
+                },
+                child: const Text('Manage protected credentials'),
+              ),
               SwitchListTile(
                 dense: true,
                 visualDensity: VisualDensity.compact,
@@ -287,13 +367,34 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
               ] else
                 ProtoSourcesEditor(
                   initial: sourceData,
+                  desk: desk,
                   manager: SourceManager.forWorkspace(
                     desk.engine.loader,
                     desk.store.path,
+                    credentials: desk.credentials,
                   ),
                   onChanged: (value) => sourceData = value,
                 ),
             ],
+            if (table == 'collection_requests')
+              MetadataCredentialEditor(
+                desk: desk,
+                title: 'Protected request headers',
+                scope: () {
+                  final server = desk.servers
+                      .where((s) => s['id'] == record?['serverId'])
+                      .firstOrNull;
+                  if (server == null) throw CredentialFailure.missing;
+                  return DeskController.credentialScope(server);
+                },
+                references: savedRequestCredentials,
+                onChanged: (v) => setState(() => savedRequestCredentials = v),
+                literals: () => DeskController.parseMetadata(
+                  fields['requestMetadataJson']!.text,
+                ),
+                onLiteralsChanged: (v) =>
+                    fields['requestMetadataJson']!.text = pretty.convert(v),
+              ),
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.redAccent)),
           ],
@@ -308,10 +409,27 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
       FilledButton(
         onPressed: () {
           try {
+            if (credentialError != null) {
+              throw FormatException(credentialError!);
+            }
             final value = <String, Object?>{
               ...?record,
               for (final e in fields.entries) e.key: e.value.text,
+              if (table == 'collection_requests' &&
+                  (savedRequestCredentials.headers.isNotEmpty ||
+                      record?.containsKey('requestCredentialReferencesJson') ==
+                          true))
+                'requestCredentialReferencesJson': savedRequestCredentials
+                    .encode(),
               if (table == 'servers') ...{
+                if (rpcCredentials.headers.isNotEmpty ||
+                    record?.containsKey('metadataReferencesJson') == true)
+                  'metadataReferencesJson': rpcCredentials.encode(),
+                if (reflectionCredentials.headers.isNotEmpty ||
+                    record?.containsKey('reflectionMetadataReferencesJson') ==
+                        true)
+                  'reflectionMetadataReferencesJson': reflectionCredentials
+                      .encode(),
                 'tlsEnabled': tls,
                 'tlsCaFile': caFile,
                 'tlsClientCertificateFile': clientCertificateFile,
@@ -330,6 +448,7 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
             };
             if (table == 'servers') {
               if (sourceError != null) throw FormatException(sourceError!);
+
               value.remove('sourceError');
               value.remove('protoSourcesJson');
               value.remove('protoFilesJson');
@@ -856,14 +975,41 @@ Future<void> previewRequest(
 }
 
 Future<void> showWorkspace(BuildContext context, DeskController desk) async {
+  bool includeLiterals = false, includeBodies = false;
   String message =
-      'Version 2 export · Version 1/2 import · Servers, proto references, collections, and examples. History is excluded. Imports create new records.';
+      'Safe export omits metadata values and request bodies by default. Protected values never leave the OS store. References require rebinding on another computer. Version 2 export · Version 1/2 import · Servers, proto references, collections, and examples. History is excluded. Imports create new records.';
   await showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
         title: const Text('Workspace transfer'),
-        content: SizedBox(width: 560, child: SelectableText(message)),
+        content: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SelectableText(message),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Include stored literal metadata / source extensions (may contain reusable tokens)',
+                ),
+                value: includeLiterals,
+                onChanged: (v) => setState(() => includeLiterals = v!),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Include request bodies and streaming sequences (may contain sensitive data)',
+                ),
+                value: includeBodies,
+                onChanged: (v) => setState(() => includeBodies = v!),
+              ),
+            ],
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -916,7 +1062,7 @@ Future<void> showWorkspace(BuildContext context, DeskController desk) async {
                 if (!context.mounted || location == null) return;
                 await XFile.fromData(
                   utf8.encode(
-                    '${pretty.convert(desk.store.exportWorkspace())}\n',
+                    '${pretty.convert(desk.store.exportWorkspace(includeSensitiveLiterals: includeLiterals, includeRequestBodies: includeBodies))}\n',
                   ),
                   mimeType: 'application/json',
                 ).saveTo(location.path);

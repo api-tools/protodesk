@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../transport/engine.dart';
+import '../security/redaction.dart';
 import 'controller.dart';
 import 'design.dart';
 
@@ -159,12 +160,24 @@ Future<void> showResponseMetadata(BuildContext context, CallResult? result) =>
               onPressed: () => Clipboard.setData(
                 ClipboardData(
                   text: pretty.convert({
+                    'headers': redactedMetadata(result?.headers ?? {}),
+                    'trailers': redactedMetadata(result?.trailers ?? {}),
+                    'note': 'All metadata values redacted; request and response bodies excluded.',
+                  }),
+                ),
+              ),
+              child: const Text('Copy redacted diagnostics'),
+            ),
+            TextButton(
+              onPressed: () => Clipboard.setData(
+                ClipboardData(
+                  text: pretty.convert({
                     'headers': result?.headers ?? {},
                     'trailers': result?.trailers ?? {},
                   }),
                 ),
               ),
-              child: const Text('Copy all'),
+              child: const Text('Copy all (sensitive)'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context),

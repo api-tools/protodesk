@@ -384,6 +384,8 @@ void main() {
             matching: find.byType(Checkbox),
           )
           .first;
+      await tester.ensureVisible(checkbox);
+      await tester.pumpAndSettle();
       await tester.tap(checkbox);
       await tester.pump();
       expect(desk.metadata, isNot(contains('x-request-context')));

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../build_info.dart';
 import 'controller.dart';
+import 'credentials.dart';
 import 'dialogs.dart';
 import 'field_editor.dart';
 import 'response_tree.dart';
@@ -533,6 +534,26 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                             text: desk.metadata,
                             onChanged: (v) {
                               desk.metadata = v;
+                            },
+                          ),
+                          const SizedBox(height: DeskSpace.inset),
+                          MetadataCredentialEditor(
+                            desk: desk,
+                            title: 'Protected request headers',
+                            scope: () => DeskController.credentialScope(
+                              desk.server!,
+                              authority: desk.authority,
+                            ),
+                            references: desk.requestCredentials,
+                            onChanged: (v) {
+                              desk.requestCredentials = v;
+                              desk.emit();
+                            },
+                            literals: () =>
+                                DeskController.parseMetadata(desk.metadata),
+                            onLiteralsChanged: (v) {
+                              desk.metadata = pretty.convert(v);
+                              desk.emit();
                             },
                           ),
                           const SizedBox(height: DeskSpace.inset),

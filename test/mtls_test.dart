@@ -269,7 +269,10 @@ void main() {
         '',
       );
       store.save('servers', saved);
-      final exported = store.exportWorkspace();
+      final exported = store.exportWorkspace(
+        includeSensitiveLiterals: true,
+        includeRequestBodies: true,
+      );
       store.importWorkspace(exported);
       final imported = store
           .list('servers')

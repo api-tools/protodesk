@@ -11,6 +11,7 @@ ProtoDesk application code is licensed under MIT. Bundled dependencies retain th
 - Microsoft Visual C++ Runtime (Windows bundles): Microsoft redistributable components under the Visual Studio license, https://visualstudio.microsoft.com/license-terms/. These components keep their Microsoft license and are not covered by the application MIT license.
 - Flutter and its framework: BSD-3-Clause; Material Icons: Apache-2.0. Flutter's generated license registry includes package notices in the compiled application.
 - Dart archive: MIT, https://github.com/brendan-duncan/archive. Bounded ZIP metadata inspection and proto extraction; package licenses are included in Flutter’s generated registry.
+- flutter_secure_storage 11.2.0 and its native OS backends: BSD-3-Clause, German Saprykin and contributors, https://github.com/juliansteenbakker/flutter_secure_storage. Package/native dependency notices are included in Flutter’s generated license registry. Linux links system libsecret (LGPL-2.1-or-later).
 - file_selector, path, uuid and their dependencies retain their package licenses. See the application's Flutter license registry for full license text.
 
 `test/fixtures/test-only-key.pem` is a public, test-only TLS key. It is not used by the application and must never be used for a real server.

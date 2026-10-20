@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.8+9
+version: 1.0.9+10
 
 environment:
   sdk: ^3.13.5
@@ -44,6 +44,7 @@ dependencies:
   uuid: ^4.6.0
   archive: ^4.5.2
   crypto: ^3.0.7
+  flutter_secure_storage: 11.2.0
 
 # grpc 5.1 constrains http2 to 2.x; 3.1 preserves its transport API and
 # fixes late headers after cancellation. Covered by transport and release tests.

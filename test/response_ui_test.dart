@@ -78,7 +78,7 @@ void main() {
       expect(jsonDecode(copied!), data);
       await tester.tap(find.text('Headers / trailers'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Copy all'));
+      await tester.tap(find.text('Copy all (sensitive)'));
       expect(jsonDecode(copied!), {
         'headers': {'x-response': 'fixture'},
         'trailers': {'grpc-status': '13'},

@@ -18,6 +18,6 @@ macOS is **ad-hoc signed and not notarized**; Windows is unsigned. Signed/notari
 
 - macOS: extract `ProtoDesk-macos-development.zip` and open `ProtoDesk.app`. Universal Intel/Apple Silicon; macOS may require explicit approval for this downloaded development app. Do not disable Gatekeeper.
 - Windows x64: extract the complete ZIP and run `protodesk.exe`; keep its DLLs/data beside it.
-- Linux x64: extract the archive and run `bundle/protodesk`; GTK 3 and desktop system libraries are required.
+- Linux x64: extract the archive and run `bundle/protodesk`; GTK 3, libsecret (`libsecret-1-0`) and desktop system libraries are required; protected credentials additionally need a running Secret Service.
 
 Verify downloaded files against `SHA256SUMS.txt`. Optional `PROTODESK_DATA_DIR` selects an explicit absolute directory for isolated or portable user storage; without it the existing platform storage path is unchanged. It never clears data.

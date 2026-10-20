@@ -9,15 +9,20 @@ import '../sources/configuration.dart';
 import '../sources/manager.dart';
 import '../schema/proto_loader.dart';
 import 'design.dart';
+import 'controller.dart';
+import 'credentials.dart';
+import '../security/credentials.dart';
 
 class ProtoSourcesEditor extends StatefulWidget {
   final Map<String, Object?> initial;
   final SourceManager manager;
+  final DeskController? desk;
   final ValueChanged<Map<String, Object?>> onChanged;
   const ProtoSourcesEditor({
     super.key,
     required this.initial,
     required this.manager,
+    this.desk,
     required this.onChanged,
   });
   @override
@@ -272,6 +277,7 @@ class _ProtoSourcesEditorState extends State<ProtoSourcesEditor> {
                 _GitFields(
                   key: ValueKey(sources[i]['id']),
                   source: sources[i],
+                  desk: widget.desk,
                   enabled: !busy,
                   onChanged: (source) {
                     setState(() {
@@ -519,12 +525,14 @@ class _RootFieldState extends State<_RootField> {
 }
 
 class _GitFields extends StatefulWidget {
+  final DeskController? desk;
   final Map<String, Object?> source;
   final bool enabled;
   final ValueChanged<Map<String, Object?>> onChanged;
   const _GitFields({
     super.key,
     required this.source,
+    this.desk,
     required this.enabled,
     required this.onChanged,
   });
@@ -533,6 +541,7 @@ class _GitFields extends StatefulWidget {
 }
 
 class _GitFieldsState extends State<_GitFields> {
+  String? credentialError;
   late final fields = {
     for (final key in ['url', 'ref', 'directory', 'roots'])
       key: TextEditingController(
@@ -576,7 +585,7 @@ class _GitFieldsState extends State<_GitFields> {
             maxLines: key == 'roots' ? 3 : 1,
             decoration: InputDecoration(
               labelText: {
-                'url': 'Repository URL (public GitHub HTTPS)',
+                'url': 'Repository URL (GitHub HTTPS)',
                 'ref': 'Branch / tag / commit',
                 'directory': 'Proto directory (repository relative)',
                 'roots': 'Repository import roots (one per line; blank = repository root)',
@@ -584,6 +593,64 @@ class _GitFieldsState extends State<_GitFields> {
             ),
           ),
         ),
+      if (widget.desk != null) ...[
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            widget.source['credentialRef'] == null
+                ? 'Authentication: public / anonymous'
+                : 'Authentication: protected credential reference (repository-bound)',
+            style: DeskType.secondary,
+          ),
+        ),
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: !widget.enabled
+                  ? null
+                  : () async {
+                      try {
+                        final (owner, name) = repository(
+                          fields['url']!.text.trim(),
+                        );
+                        final id = await createCredential(
+                          context,
+                          widget.desk!,
+                          CredentialScope.github(owner, name),
+                        );
+                        if (!mounted || id == null) return;
+                        widget.onChanged({
+                          ...widget.source,
+                          'credentialRef': id,
+                        });
+                        setState(() => credentialError = null);
+                      } catch (e) {
+                        if (mounted) {
+                          setState(() => credentialError = e.toString());
+                        }
+                      }
+                    },
+              child: const Text('Set / replace GitHub token'),
+            ),
+            if (widget.source['credentialRef'] != null)
+              TextButton(
+                onPressed: !widget.enabled
+                    ? null
+                    : () => widget.onChanged(
+                        {...widget.source}..remove('credentialRef'),
+                      ),
+                child: const Text('Use anonymous access'),
+              ),
+          ],
+        ),
+        const Text(
+          'Fine-grained PAT: Contents read access to this repository. Token stays in the OS credential store. Changing repository requires rebinding.',
+          style: DeskType.secondary,
+        ),
+        if (credentialError != null)
+          Text(credentialError!, style: DeskType.secondary),
+      ],
     ],
   );
 }

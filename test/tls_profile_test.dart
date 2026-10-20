@@ -78,7 +78,10 @@ void main() {
         ...profile,
         'tlsCaFile': File('test/fixtures/test-only-ca.pem').absolute.path,
       });
-      final exported = store.exportWorkspace();
+      final exported = store.exportWorkspace(
+        includeSensitiveLiterals: true,
+        includeRequestBodies: true,
+      );
       desk.dispose();
       store = WorkspaceStore.open('${directory.path}/workspace.sqlite');
       store.importWorkspace(exported);

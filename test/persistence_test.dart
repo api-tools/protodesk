@@ -123,7 +123,10 @@ void main() {
         'serverAddress': 'localhost:50051',
         'fullMethod': '/example.Echo/Call',
       });
-      final exported = store.exportWorkspace();
+      final exported = store.exportWorkspace(
+        includeSensitiveLiterals: true,
+        includeRequestBodies: true,
+      );
       expect(exported.containsKey('history'), false);
       final counts = store.importWorkspace(exported);
       expect(counts, {
