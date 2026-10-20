@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 
 import 'configuration.dart';
 import 'discovery.dart';
+import '../security/credentials.dart';
 
 /// Provider seam for future hosts and credential-store-backed authentication.
 abstract interface class RepositoryProvider {
@@ -357,11 +358,237 @@ class GitHubProvider implements RepositoryProvider {
   }
 }
 
+/// The authenticated API request and the signed archive request deliberately use
+/// separate clients: a PAT can only be attached to the bound GitHub API path.
+class RepositoryHttpResponse {
+  final int status;
+  final List<int> bytes;
+  final String? location;
+  RepositoryHttpResponse(this.status, this.bytes, {this.location});
+}
+
+typedef RepositoryHttpRequest = Future<RepositoryHttpResponse> Function(
+  Uri uri,
+  Map<String, String> headers,
+  SourceOperation operation,
+);
+
+class AuthenticatedGitHubProvider implements RepositoryProvider {
+  final CredentialService credentials;
+  final String credential;
+  final String owner, name;
+  final RepositoryHttpRequest send;
+  late final GitHubProvider _provider = GitHubProvider(
+    request: (path, operation) async {
+      if (path.length != 5 ||
+          path[0] != 'repos' ||
+          path[1] != owner ||
+          path[2] != name ||
+          path[3] != 'commits' ||
+          path[4].split('/').any((s) => s == '.' || s == '..')) {
+        throw CredentialFailure.wrongScope;
+      }
+      final response = await _api(
+        Uri(scheme: 'https', host: 'api.github.com', pathSegments: path),
+        operation,
+      );
+      if (response.status != 200 || response.bytes.length > 16 * 1024 * 1024) {
+        throw const FormatException(
+          'GitHub revision could not be resolved. Check access, reference and API limits.',
+        );
+      }
+      return Map<String, dynamic>.from(
+        jsonDecode(utf8.decode(response.bytes)) as Map,
+      );
+    },
+    download: (uri, operation) async {
+      final sha = uri.pathSegments.last;
+      if (!RegExp(r'^[0-9a-f]{40}$').hasMatch(sha)) {
+        throw CredentialFailure.invalid;
+      }
+      final response = await _api(
+        Uri(
+          scheme: 'https',
+          host: 'api.github.com',
+          pathSegments: ['repos', owner, name, 'zipball', sha],
+        ),
+        operation,
+      );
+      if (response.status != 302 || response.location == null) {
+        throw const FormatException(
+          'GitHub archive could not be fetched. Check repository access.',
+        );
+      }
+      final target = Uri.tryParse(response.location!);
+      if (!response.location!.startsWith('https://codeload.github.com/') ||
+          target == null ||
+          target.scheme != 'https' ||
+          target.host != 'codeload.github.com' ||
+          target.userInfo.isNotEmpty ||
+          target.hasPort ||
+          target.hasFragment ||
+          target.toString().length > 16384 ||
+          target.path.toLowerCase() !=
+              '/$owner/$name/legacy.zip/$sha'.toLowerCase()) {
+        throw const FormatException('Unsafe repository archive redirect');
+      }
+      operation.check();
+      // No Authorization header crosses the redirect boundary.
+      final archive = await send(target, const {}, operation);
+      if (archive.status != 200 || archive.bytes.length > 64 * 1024 * 1024) {
+        throw const FormatException(
+          'Repository archive download failed or exceeded 64 MiB',
+        );
+      }
+      return archive.bytes;
+    },
+  );
+  AuthenticatedGitHubProvider(
+    this.credentials,
+    this.credential,
+    this.owner,
+    this.name, {
+    RepositoryHttpRequest? send,
+  }) : send = send ?? _send;
+
+  Future<RepositoryHttpResponse> _api(
+    Uri uri,
+    SourceOperation operation,
+  ) async {
+    final token = await credentials.resolve(
+      credential,
+      CredentialScope.github(owner, name),
+    );
+    operation.check();
+    return send(uri, {
+      'Authorization': 'Bearer $token',
+      'Accept': 'application/vnd.github+json',
+    }, operation);
+  }
+
+  void _checkRepository(String url) {
+    if (repository(url) != (owner, name)) throw CredentialFailure.wrongScope;
+  }
+
+  @override
+  Future<String> resolve(
+    String url,
+    String reference,
+    SourceOperation operation,
+  ) async {
+    _checkRepository(url);
+    try {
+      return await _provider.resolve(url, reference, operation);
+    } on CredentialFailure {
+      rethrow;
+    } catch (_) {
+      throw const FormatException(
+        'Authenticated GitHub revision lookup failed. Check access, reference and network; sensitive details are omitted.',
+      );
+    }
+  }
+
+  @override
+  Future<void> fetch(
+    String url,
+    String commit,
+    Directory destination,
+    SourceOperation operation,
+  ) async {
+    _checkRepository(url);
+    try {
+      await _provider.fetch(url, commit, destination, operation);
+    } on CredentialFailure {
+      rethrow;
+    } catch (_) {
+      throw const FormatException(
+        'Authenticated GitHub archive fetch failed. Check access and network; sensitive details are omitted.',
+      );
+    }
+  }
+
+  static Future<RepositoryHttpResponse> _send(
+    Uri uri,
+    Map<String, String> headers,
+    SourceOperation operation,
+  ) async {
+    if (uri.scheme != 'https' ||
+        !['api.github.com', 'codeload.github.com'].contains(uri.host) ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasPort ||
+        (headers.isNotEmpty && uri.host != 'api.github.com')) {
+      throw CredentialFailure.wrongScope;
+    }
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    void cancel() => client.close(force: true);
+    operation.onCancel(cancel);
+    client.findProxy = (_) => 'DIRECT';
+    client.connectionFactory = (target, proxyHost, proxyPort) async {
+      if (target.host != uri.host ||
+          target.scheme != 'https' ||
+          proxyHost != null) {
+        throw CredentialFailure.wrongScope;
+      }
+      final addresses = await InternetAddress.lookup(
+        target.host,
+        type: InternetAddressType.IPv4,
+      );
+      if (addresses.isEmpty ||
+          addresses.any((a) => !GitHubProvider.publicAddress(a))) {
+        throw const FormatException('Unsafe repository network address');
+      }
+      operation.check();
+      return GitHubProvider._secureConnection(addresses.first, target);
+    };
+    try {
+      operation.check();
+      final request = await client
+          .getUrl(uri)
+          .timeout(const Duration(seconds: 15));
+      request.followRedirects = false;
+      request.headers.set('User-Agent', 'ProtoDesk');
+      headers.forEach(request.headers.set);
+      final response = await request.close().timeout(
+        const Duration(seconds: 15),
+      );
+      if (response.statusCode == 302) {
+        return RepositoryHttpResponse(
+          302,
+          const [],
+          location: response.headers.value('location'),
+        );
+      }
+      final bytes = BytesBuilder(copy: false);
+      final limit = uri.host == 'api.github.com'
+          ? 16 * 1024 * 1024
+          : 64 * 1024 * 1024;
+      await for (final chunk in response.timeout(const Duration(seconds: 15))) {
+        operation.check();
+        if (bytes.length + chunk.length > limit) {
+          throw const FormatException(
+            'Repository response exceeds resource limits',
+          );
+        }
+        bytes.add(chunk);
+      }
+      return RepositoryHttpResponse(response.statusCode, bytes.takeBytes());
+    } finally {
+      operation.removeCancel(cancel);
+      client.close(force: true);
+    }
+  }
+}
+
 class RepositoryCache {
   final Directory directory;
   final RepositoryProvider provider;
-  RepositoryCache(this.directory, {RepositoryProvider? provider})
-    : provider = provider ?? GitHubProvider();
+  final RepositoryProvider Function(Map<String, Object?>)? providerForSource;
+  RepositoryCache(
+    this.directory, {
+    RepositoryProvider? provider,
+    this.providerForSource,
+  }) : provider = provider ?? GitHubProvider();
   Future<Map<String, String>> _manifest(
     Directory revision,
     SourceOperation operation,
@@ -414,11 +641,18 @@ class RepositoryCache {
   }) async {
     final url = source['url'] as String;
     final (owner, name) = repository(url);
+    RepositoryProvider networkProvider() {
+      if (source['credentialRef'] != null && providerForSource == null) {
+        throw CredentialFailure.missing;
+      }
+      return providerForSource?.call(source) ?? provider;
+    }
+
     String? commit = source['commit'] as String?;
     if (refresh || commit == null) {
       operation.progress('Resolving repository revision…');
       commit = await operation.wait(
-        provider.resolve(url, source['ref'] as String, operation),
+        networkProvider().resolve(url, source['ref'] as String, operation),
       );
     }
     if (commit == null || !RegExp(r'^[0-9a-f]{40}$').hasMatch(commit)) {
@@ -459,7 +693,7 @@ class RepositoryCache {
     }
     final temp = await parent.createTemp('.fetch-');
     try {
-      await provider.fetch(url, commit, temp, operation);
+      await networkProvider().fetch(url, commit, temp, operation);
       operation.check();
       final metadata = jsonEncode(await _manifest(temp, operation));
       if (metadata.length > 2 * 1024 * 1024) {

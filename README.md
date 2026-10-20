@@ -10,7 +10,7 @@ Choose a server → browse services and methods → edit a request → invoke �
 - Searchable, collapsible JSON responses with quoted keys/values, expand/collapse all, full JSON copy, highlighted matches and ancestor context. Clearing search restores expansion; each call starts with fresh expansion state.
 - gRPC status, duration, message count and live stream state in the footer. Response headers/trailers open in a compact secondary dialog with copy and empty states; request metadata stays editable.
 - Plaintext or verified TLS connections, optional PEM mTLS client identity, separate reflection/RPC metadata, reflection v1/v1alpha, request headers, deadlines, and optional SNI/authority overrides. See [connection security](docs/CONNECTION_SECURITY.md).
-- Reflection-first API discovery with offline local/Git schema fallback. Combine native file/folder imports and public GitHub repositories by branch/tag/commit, select entry points, configure independent import roots, validate with bundled protoc, and reuse validated revisions offline. Persistent file access on macOS. See [source management](docs/PROTOBUF_SOURCES.md).
+- Reflection-first API discovery with offline local/Git schema fallback. Combine native file/folder imports and public or credential-backed private GitHub repositories by branch/tag/commit, select entry points, configure independent import roots, validate with bundled protoc, and reuse validated revisions offline. Persistent file access on macOS. See [source management](docs/PROTOBUF_SOURCES.md).
 - Runtime protobuf descriptors and JSON encoding: user APIs do not need generated application classes. Supports scalar types, 64-bit string integers, bytes, enums, maps, repeated/nested/recursive messages, oneofs, presence, and well-known JSON types.
 - Schema-aware Form/JSON editing, individual repeated-item controls, enum and boolean controls, timestamp date/time selection, and validation that retains invalid local drafts.
 - Unary, server-streaming, client-streaming and bidirectional RPCs. Compose Form/JSON messages, queue snapshots, start a request stream, send messages and explicitly finish sending. Bidirectional replies and headers arrive while the send side remains open. Cancellation, deadlines and errors retain partial responses. Incoming data is capped at 1,000 messages / 64 MiB; the send queue at 64 messages / 32 MiB, with 1,000 messages / 64 MiB wire and JSON per request stream.
@@ -18,13 +18,15 @@ Choose a server → browse services and methods → edit a request → invoke �
 
 Proto2/proto3 schemas are supported; protobuf editions are currently rejected with an actionable error. Proto loading is bounded to 2,048 files, 32 MiB total, 4 MiB per file, and a 10-second compiler deadline. Absolute/parent imports and symlinks escaping configured roots are rejected. Requests/responses are bounded to 32 MiB and 64 nested message levels.
 
+See [protected credentials](docs/CREDENTIALS.md) for OS-store references, explicit literal migration, private GitHub access and safe workspace/diagnostic exports.
+
 ## Downloads
 
 Download the tested [current production release](https://github.com/api-tools/protodesk/releases/latest) or browse [Releases](https://github.com/api-tools/protodesk/releases). Development releases use `dev-v*` tags and are explicitly marked as prereleases; production `v*` tags retain the separate fail-closed signing/notarization gate. End users do not need Flutter, Dart, or protoc.
 
 - macOS: extract `ProtoDesk.app`. Production `ProtoDesk-macos-universal.zip` is universal Intel/Apple Silicon, Developer ID signed, Apple notarized and stapled. Distinct `ProtoDesk-macos-development.zip` prereleases are ad-hoc signed and **not notarized**.
 - Windows x64: extract the entire ZIP and run `protodesk.exe`. The executable is **unsigned**; retain the DLLs and data directory beside it.
-- Linux x64: extract the archive and run `bundle/protodesk`. GTK 3 and the usual desktop system libraries must be installed.
+- Linux x64: extract the archive and run `bundle/protodesk`. GTK 3 and the usual desktop system libraries must be installed. Protected credentials additionally require libsecret (`libsecret-1-0`) and a running Secret Service; public sources and literal headers do not require credential-store access.
 
 ## Local data
 

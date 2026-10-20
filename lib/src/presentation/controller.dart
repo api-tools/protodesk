@@ -10,12 +10,20 @@ import '../schema/codec.dart';
 import '../sources/manager.dart';
 import '../sources/configuration.dart';
 import '../persistence/store.dart';
+import '../security/credentials.dart';
+import '../security/catalog.dart';
+import '../security/native_vault.dart';
+import '../security/redaction.dart';
 
 const pretty = JsonEncoder.withIndent('  ');
 
 class DeskController extends ChangeNotifier {
   final WorkspaceStore store;
   final GrpcEngine engine;
+  late final CredentialService credentials;
+  late final SqliteCredentialCatalog credentialCatalog;
+  MetadataReferences requestCredentials = MetadataReferences({});
+  int? _resolvingCredentialGeneration;
   List<Record> servers = [], collections = [], history = [];
   Record? server;
   SchemaRegistry schema = SchemaRegistry();
@@ -42,7 +50,12 @@ class DeskController extends ChangeNotifier {
   int _generation = 0;
   bool _disposed = false;
   SourceOperation? sourceOperation;
-  DeskController(this.store, this.engine) {
+  DeskController(this.store, this.engine, {CredentialVault? credentialVault}) {
+    credentialCatalog = SqliteCredentialCatalog(store);
+    credentials = CredentialService(
+      credentialVault ?? NativeCredentialVault(),
+      credentialCatalog,
+    );
     refresh();
   }
   void emit() {
@@ -61,6 +74,7 @@ class DeskController extends ChangeNotifier {
     await disconnect();
     server = selected;
     metadata = '{}';
+    requestCredentials = MetadataReferences({});
     emit();
   }
 
@@ -83,6 +97,7 @@ class DeskController extends ChangeNotifier {
       final (validation, manifest) = await SourceManager.forWorkspace(
         engine.loader,
         store.path,
+        credentials: credentials,
       ).validate(SourceConfiguration.fromRecord(server!), operation);
       if (_disposed || generation != _generation) return;
       schema = validation.schema;
@@ -119,6 +134,7 @@ class DeskController extends ChangeNotifier {
     final operation = sourceOperation = SourceOperation();
     status = 'Connecting…';
     emit();
+    final connectionSecrets = <String>[];
     try {
       final s = server!;
       Future<SchemaRegistry> compileLocal() async {
@@ -127,6 +143,7 @@ class DeskController extends ChangeNotifier {
         final (validation, manifest) = await SourceManager.forWorkspace(
           engine.loader,
           store.path,
+          credentials: credentials,
         ).validate(config, operation);
         if (generation != _generation || _disposed) {
           throw const FormatException('Source discovery cancelled');
@@ -160,6 +177,29 @@ class DeskController extends ChangeNotifier {
         }
       }
       if (generation != _generation) return;
+      final inherited = reflectionJson.isEmpty;
+      final reflectionReferences = MetadataReferences.decode(
+        s['reflectionMetadataReferencesJson'] as String?,
+      );
+      final baseReferences = MetadataReferences.decode(
+        s['metadataReferencesJson'] as String?,
+      );
+      final reflectionHeaders = s['reflectionEnabled'] == false
+          ? <String, String>{}
+          : await MetadataReferences({
+              if (inherited) ...baseReferences.headers,
+              ...reflectionReferences.headers,
+            }).resolve(
+              parseMetadata(
+                inherited
+                    ? s['metadataJson'] as String? ?? '{}'
+                    : reflectionJson,
+              ),
+              credentials,
+              credentialScope(s),
+            );
+      if (generation != _generation || _disposed) return;
+      connectionSecrets.addAll(reflectionHeaders.values);
       final discovery = await engine.connect(
         ConnectionConfig(
           s['address'] as String,
@@ -167,12 +207,10 @@ class DeskController extends ChangeNotifier {
           certificates: certificates,
           identity: identity,
           serverName: (s['tlsServerName'] as String? ?? '').trim(),
-          reflectionMetadata: reflectionJson.isEmpty
-              ? null
-              : parseMetadata(reflectionJson),
+          reflectionMetadata: reflectionHeaders,
           reflection: s['reflectionEnabled'] != false,
           schemaProvider: compileLocal,
-          metadata: parseMetadata(s['metadataJson'] as String? ?? '{}'),
+          metadata: const {},
         ),
       );
       if (generation != _generation) return;
@@ -181,7 +219,7 @@ class DeskController extends ChangeNotifier {
       connected = true;
       warning = [
         warning,
-        discovery.warning,
+        redactKnownSecrets(discovery.warning, connectionSecrets),
       ].where((s) => s.isNotEmpty).join('\n');
       status =
           'Connected · ${discovery.source} · ${schema.services.length} services';
@@ -194,6 +232,7 @@ class DeskController extends ChangeNotifier {
             final (validation, manifest) = await SourceManager.forWorkspace(
               engine.loader,
               store.path,
+              credentials: credentials,
             ).validate(config, operation);
             if (generation != _generation || _disposed) return;
             schema = validation.schema;
@@ -209,7 +248,7 @@ class DeskController extends ChangeNotifier {
         }
         if (generation != _generation || _disposed) return;
         status =
-            'Server transport failed: $e${schema.services.isEmpty ? '' : ' · local schema remains available'}';
+            'Server transport failed: ${redactKnownSecrets(e.toString(), connectionSecrets)}${schema.services.isEmpty ? '' : ' · local schema remains available'}';
       }
     } finally {
       if (generation == _generation) {
@@ -388,8 +427,28 @@ class DeskController extends ChangeNotifier {
     final request = body;
     final selectedServer = {...server!};
     Map<String, String> headers;
+    Map<String, String> literalHeaders;
+    late MetadataReferences usedReferences;
     try {
-      headers = parseMetadata(metadata);
+      final overrides = parseMetadata(metadata);
+      final references =
+          {
+            ...MetadataReferences.decode(
+              selectedServer['metadataReferencesJson'] as String?,
+            ).headers,
+          }..removeWhere(
+            (key, _) => overrides.keys.any((k) => k.toLowerCase() == key),
+          );
+      references.addAll(requestCredentials.headers);
+      usedReferences = MetadataReferences(references);
+      literalHeaders = {
+        for (final e in parseMetadata(
+          selectedServer['metadataJson'] as String? ?? '{}',
+        ).entries)
+          e.key.toLowerCase(): e.value,
+        for (final e in overrides.entries) e.key.toLowerCase(): e.value,
+      }..removeWhere((key, _) => references.containsKey(key));
+      headers = literalHeaders;
     } catch (e) {
       status = e.toString();
       emit();
@@ -430,6 +489,19 @@ class DeskController extends ChangeNotifier {
 
     CallResult response;
     try {
+      _resolvingCredentialGeneration = generation;
+      try {
+        headers = await usedReferences.resolve(
+          literalHeaders,
+          credentials,
+          credentialScope(selectedServer, authority: authority),
+        );
+      } finally {
+        if (_resolvingCredentialGeneration == generation) {
+          _resolvingCredentialGeneration = null;
+        }
+      }
+      if (generation != _generation || _disposed) return;
       if (selected.clientStreaming) {
         requestStream = engine.startRequestStream(
           selected,
@@ -466,6 +538,7 @@ class DeskController extends ChangeNotifier {
         );
       }
     } catch (e) {
+      if (generation != _generation || _disposed) return;
       await engine.cancel();
       response = CallResult(
         List.of(messages),
@@ -477,6 +550,17 @@ class DeskController extends ChangeNotifier {
       );
     }
     if (generation != _generation) return;
+    final safeError = redactKnownSecrets(response.error, headers.values);
+    if (safeError != response.error) {
+      response = CallResult(
+        response.messages,
+        response.code,
+        safeError,
+        response.durationMs,
+        response.headers,
+        response.trailers,
+      );
+    }
     callClock.stop();
     replaying = false;
     result = response;
@@ -493,10 +577,8 @@ class DeskController extends ChangeNotifier {
         'fullMethod': selected.path,
         'requestJson': request,
         'requestStreamJson': jsonEncode(outgoing),
-        'requestMetadataJson': jsonEncode({
-          ...parseMetadata(selectedServer['metadataJson'] as String? ?? '{}'),
-          ...headers,
-        }),
+        'requestMetadataJson': jsonEncode(literalHeaders),
+        'requestCredentialReferencesJson': usedReferences.encode(),
         'responseJson': pretty.convert(
           selected.serverStreaming
               ? response.messages
@@ -515,10 +597,27 @@ class DeskController extends ChangeNotifier {
   }
 
   Future<void> cancel() async {
+    if (_resolvingCredentialGeneration == _generation) {
+      ++_generation;
+      invoking = false;
+      callClock.stop();
+      status = 'Cancelled before credentials resolved';
+      emit();
+    }
     await engine.cancel();
   }
 
   void loadRequest(Record item) {
+    late MetadataReferences references;
+    try {
+      references = MetadataReferences.decode(
+        item['requestCredentialReferencesJson'] as String?,
+      );
+    } catch (_) {
+      status = 'Request has invalid protected references. Repair or remove them in the saved request editor.';
+      emit();
+      return;
+    }
     ++_generation;
     engine.cancel();
     invoking = false;
@@ -531,6 +630,7 @@ class DeskController extends ChangeNotifier {
     if (queue is List) queuedRequests.addAll(queue);
     body = item['requestJson'] as String? ?? '{}';
     metadata = item['requestMetadataJson'] as String? ?? '{}';
+    requestCredentials = references;
     result = null;
     messages.clear();
     responseRevision++;
@@ -553,6 +653,7 @@ class DeskController extends ChangeNotifier {
       queuedRequests.isNotEmpty ? queuedRequests : sentRequests,
     ),
     'requestMetadataJson': metadata,
+    'requestCredentialReferencesJson': requestCredentials.encode(),
   };
   String get responseJson => pretty.convert(
     method?.serverStreaming == true
@@ -561,17 +662,22 @@ class DeskController extends ChangeNotifier {
         ? {}
         : messages.first,
   );
-  static Map<String, String> parseMetadata(String text) {
-    final value = jsonDecode(text);
-    if (value is! Map || value.values.any((v) => v is! String)) {
-      throw const FormatException('Metadata must be a JSON object of strings');
-    }
-    return value.cast<String, String>();
-  }
+  static CredentialScope credentialScope(
+    Record server, {
+    String authority = '',
+  }) => CredentialScope.metadata(
+    server['address'] as String,
+    tls: server['tlsEnabled'] == true,
+    serverName: server['tlsServerName'] as String? ?? '',
+    authority: authority,
+  );
+  static Map<String, String> parseMetadata(String text) =>
+      parseLiteralMetadata(text);
 
   @override
   void dispose() {
     _disposed = true;
+    credentials.dispose();
     sourceOperation?.cancel();
     callClock.stop();
     ++_generation;

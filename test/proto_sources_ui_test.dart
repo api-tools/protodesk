@@ -210,7 +210,7 @@ void main() {
       }
 
       await enter(
-        'Repository URL (public GitHub HTTPS)',
+        'Repository URL (GitHub HTTPS)',
         'https://github.com/example/protos',
       );
       await enter('Branch / tag / commit', 'v1');

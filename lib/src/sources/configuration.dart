@@ -3,6 +3,8 @@ import 'dart:async';
 
 import 'package:path/path.dart' as p;
 
+import '../security/credentials.dart';
+
 /// Versioned JSON is retained verbatim, including extension fields.
 class SourceConfiguration {
   final Map<String, Object?> data;
@@ -34,6 +36,11 @@ class SourceConfiguration {
       }
       if (source['type'] == 'git') {
         repository(source['url'] as String? ?? '');
+        if (source['credentialRef'] != null &&
+            (source['credentialRef'] is! String ||
+                !validCredentialId(source['credentialRef'] as String))) {
+          throw CredentialFailure.invalid;
+        }
         relativePath(source['directory'] as String? ?? '');
         for (final root in strings(source['roots'] ?? [''])) {
           relativePath(root);

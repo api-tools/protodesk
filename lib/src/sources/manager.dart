@@ -6,6 +6,7 @@ import '../schema/proto_loader.dart';
 import 'configuration.dart';
 import 'discovery.dart';
 import 'git_provider.dart';
+import '../security/credentials.dart';
 
 class SourceManager {
   final ProtoLoader loader;
@@ -133,11 +134,26 @@ class SourceManager {
     );
   }
 
-  factory SourceManager.forWorkspace(ProtoLoader loader, String databasePath) =>
-      SourceManager(
-        loader,
-        RepositoryCache(
-          Directory(p.join(p.dirname(databasePath), 'schema-cache')),
-        ),
-      );
+  factory SourceManager.forWorkspace(
+    ProtoLoader loader,
+    String databasePath, {
+    CredentialService? credentials,
+  }) => SourceManager(
+    loader,
+    RepositoryCache(
+      Directory(p.join(p.dirname(databasePath), 'schema-cache')),
+      providerForSource: credentials == null
+          ? null
+          : (source) {
+              if (source['credentialRef'] == null) return GitHubProvider();
+              final (owner, name) = repository(source['url'] as String);
+              return AuthenticatedGitHubProvider(
+                credentials,
+                source['credentialRef'] as String,
+                owner,
+                name,
+              );
+            },
+    ),
+  );
 }

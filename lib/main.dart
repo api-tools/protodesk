@@ -18,6 +18,7 @@ import 'src/presentation/workspace.dart';
 import 'src/sources/configuration.dart';
 import 'src/sources/manager.dart';
 import 'src/sources/git_provider.dart';
+import 'src/security/smoke.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -69,6 +70,11 @@ Future<void> main() async {
         ? await const MethodChannel('dev.apitools.protodesk/storage')
               .invokeMethod<String>('dataPath')
         : WorkspaceStore.defaultPath();
+    if (Platform.environment['PROTODESK_SMOKE_CREDENTIALS'] == '1') {
+      await smokeNativeCredentials(dataPath!);
+      await directory.delete(recursive: true);
+      exit(0);
+    }
     final sourceSmoke = Platform.environment['PROTODESK_SMOKE_SOURCES'];
     if (sourceSmoke != null) {
       final loader = ProtoLoader(
@@ -135,7 +141,7 @@ Future<void> main() async {
           throw StateError('Fresh startup selected or connected a server');
         }
         stdout.writeln(
-          'Fresh packaged startup: PASS (all four user tables empty)',
+          'Fresh packaged startup: PASS (all user tables empty, including credential catalog)',
         );
       } finally {
         desk.dispose();
@@ -145,7 +151,8 @@ Future<void> main() async {
     }
     runApp(ProtoDeskApp(desk: desk, tools: directory));
   } catch (e) {
-    if (Platform.environment.containsKey('PROTODESK_SMOKE_SOURCES') ||
+    if (Platform.environment['PROTODESK_SMOKE_CREDENTIALS'] == '1' ||
+        Platform.environment.containsKey('PROTODESK_SMOKE_SOURCES') ||
         Platform.environment.containsKey('PROTODESK_SMOKE_ENDPOINT') ||
         Platform.environment['PROTODESK_SMOKE_FRESH'] == '1') {
       stderr.writeln('Release smoke failed: $e');

@@ -1,6 +1,6 @@
 # Protobuf source management
 
-A server profile may combine individual local `.proto` files, recursive local directories, and public GitHub repositories. In **Servers → New server / Edit server**, use **Add files**, **Add folder**, or **Add Git repository** in Proto sources. Files append without replacing earlier selections. Each source has a remove control; directory selection can be changed using its folder control. Git configuration fields are editable inline, without another modal.
+A server profile may combine individual local `.proto` files, recursive local directories, and public or credential-backed private GitHub repositories. In **Servers → New server / Edit server**, use **Add files**, **Add folder**, or **Add Git repository** in Proto sources. Files append without replacing earlier selections. Each source has a remove control; directory selection can be changed using its folder control. Git configuration fields are editable inline, without another modal.
 
 **Discover files** lists available files. Expand a directory/repository result and choose compilation entry points using its checkboxes, Select all or Select none. Clearing all entries intentionally selects nothing; it does not mean “all”. Discovery alone does not replace a successful revision. Click **Validate** to compile the selection. Save the server to persist it. Local files display their full paths; discovered directory/repository entries retain relative paths.
 
@@ -83,3 +83,5 @@ flowchart LR
 ```
 
 The conceptual [Wombat reference](https://github.com/rogchap/wombat/blob/master/internal/app/proto.go) was reviewed: its disk loader accepts filenames independently from importPaths and traverses descriptors for dependencies. ProtoDesk preserves that useful distinction while using its own Dart providers, official protoc, bounded staging, recoverable persistence and HTTPS cache. No reference code was copied.
+
+Private repository authentication and safe export behavior are described in [protected credentials](CREDENTIALS.md). Tokens are bound to one repository and stored in the OS credential store; validated caches remain usable offline without credential access.

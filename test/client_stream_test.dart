@@ -66,7 +66,14 @@ void main() {
       'collectionId': collection['id'],
       'requestStreamJson': jsonEncode(sequence),
     });
-    final exported = jsonDecode(jsonEncode(desk.store.exportWorkspace()));
+    final exported = jsonDecode(
+      jsonEncode(
+        desk.store.exportWorkspace(
+          includeSensitiveLiterals: true,
+          includeRequestBodies: true,
+        ),
+      ),
+    );
     final path = desk.store.path;
     await desk.disconnect();
     desk.dispose();
@@ -269,7 +276,12 @@ void main() {
     expect(desk.result!.headers['echo-header'], 'request');
     desk.loadRequest(history);
     expect(desk.queuedRequests.length, 3);
-    desk.store.importWorkspace(desk.store.exportWorkspace());
+    desk.store.importWorkspace(
+      desk.store.exportWorkspace(
+        includeSensitiveLiterals: true,
+        includeRequestBodies: true,
+      ),
+    );
     expect(
       desk.store
           .list('collection_requests')

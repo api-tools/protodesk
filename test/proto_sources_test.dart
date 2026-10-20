@@ -566,7 +566,10 @@ void main() {
       'address': 'example.invalid:443',
       'protoSources': config,
     });
-    final export = store.exportWorkspace();
+    final export = store.exportWorkspace(
+      includeSensitiveLiterals: true,
+      includeRequestBodies: true,
+    );
     expect(export['version'], 2);
     expect(jsonEncode(export), isNot(contains('schema-cache')));
     store.importWorkspace(export);
@@ -666,7 +669,10 @@ void main() {
         'name': 'Original',
         'address': 'example.invalid:443',
       });
-      final export = store.exportWorkspace();
+      final export = store.exportWorkspace(
+        includeSensitiveLiterals: true,
+        includeRequestBodies: true,
+      );
       (export['servers'] as List).single['futureField'] = 'preserve';
       expect(() => store.importWorkspace(export), throwsFormatException);
       expect(store.list('servers').single['id'], server['id']);
