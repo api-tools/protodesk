@@ -231,6 +231,7 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                     'address': fields['address']!.text,
                     'tlsEnabled': tls,
                     'tlsServerName': fields['tlsServerName']!.text,
+                    'tlsCaFile': caFile,
                   }),
                   references: reflectionHeaders
                       ? reflectionCredentials

@@ -24,6 +24,7 @@ class DeskController extends ChangeNotifier {
   late final SqliteCredentialCatalog credentialCatalog;
   MetadataReferences requestCredentials = MetadataReferences({});
   int? _resolvingCredentialGeneration;
+  CredentialScope? _connectedRecipient;
   List<Record> servers = [], collections = [], history = [];
   Record? server;
   SchemaRegistry schema = SchemaRegistry();
@@ -216,6 +217,7 @@ class DeskController extends ChangeNotifier {
       if (generation != _generation) return;
       schema = discovery.schema;
       method = method == null ? null : schema.methods[method!.path];
+      _connectedRecipient = credentialScope(s);
       connected = true;
       warning = [
         warning,
@@ -263,6 +265,7 @@ class DeskController extends ChangeNotifier {
     sourceOperation?.cancel();
     await engine.disconnect();
     connected = false;
+    _connectedRecipient = null;
     connecting = false;
     status = 'Discovery cancelled';
     emit();
@@ -273,6 +276,7 @@ class DeskController extends ChangeNotifier {
     ++_generation;
     await engine.disconnect();
     connected = false;
+    _connectedRecipient = null;
     connecting = false;
     invoking = false;
     schema = SchemaRegistry();
@@ -407,7 +411,7 @@ class DeskController extends ChangeNotifier {
   }
 
   Future<void> invoke() async {
-    if (!connected || method == null || invoking) return;
+    if (!connected || connecting || method == null || invoking) return;
     final error = validateBody(body);
     if (error != null) {
       status = error;
@@ -432,6 +436,12 @@ class DeskController extends ChangeNotifier {
     Map<String, String> literalHeaders;
     late MetadataReferences usedReferences;
     try {
+      if (_connectedRecipient != null &&
+          !_connectedRecipient!.matches(credentialScope(selectedServer))) {
+        throw const CredentialFailure(
+          'Connection settings changed. Reconnect before invoking; no credential was resolved or sent.',
+        );
+      }
       final overrides = parseMetadata(metadata);
       final references =
           {
@@ -671,6 +681,7 @@ class DeskController extends ChangeNotifier {
     server['address'] as String,
     tls: server['tlsEnabled'] == true,
     serverName: server['tlsServerName'] as String? ?? '',
+    caFileReference: server['tlsCaFile'] as String? ?? '',
     authority: authority,
   );
   static Map<String, String> parseMetadata(String text) =>

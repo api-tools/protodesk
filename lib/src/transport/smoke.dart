@@ -130,7 +130,19 @@ Future<void> releaseSmoke(
       'requestJson': '{}',
       'responseJson': '{}',
     });
-    store.importWorkspace(store.exportWorkspace());
+    final safe = store.exportWorkspace();
+    final safeCollection = (safe['collections'] as List).single as Map;
+    final safeRequest = (safeCollection['requests'] as List).single as Map;
+    if (safeRequest['requestJson'] != '{}' ||
+        safeRequest['requestStreamJson'] != '[]') {
+      throw StateError('Compiled safe export retained request payloads');
+    }
+    store.importWorkspace(
+      store.exportWorkspace(
+        includeSensitiveLiterals: true,
+        includeRequestBodies: true,
+      ),
+    );
     store.close();
     store = WorkspaceStore.open(database);
     try {

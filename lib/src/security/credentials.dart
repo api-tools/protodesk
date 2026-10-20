@@ -34,6 +34,7 @@ class CredentialScope {
     required bool tls,
     String serverName = '',
     String authority = '',
+    String caFileReference = '',
   }) {
     final uri = Uri.tryParse('http://$address');
     if (address.contains('://') ||
@@ -46,6 +47,10 @@ class CredentialScope {
         uri.userInfo.isNotEmpty ||
         uri.hasQuery ||
         uri.hasFragment) {
+      throw CredentialFailure.invalid;
+    }
+    if (caFileReference.length > 4096 ||
+        caFileReference.codeUnits.any((c) => c < 32 || c == 127)) {
       throw CredentialFailure.invalid;
     }
     final host = uri.host.toLowerCase();
@@ -68,6 +73,7 @@ class CredentialScope {
       jsonEncode({
         'endpoint': '$name:${uri.port}',
         'tls': tls,
+        'caFile': tls ? caFileReference : '',
         'serverName': tls ? effectiveName.toLowerCase() : '',
         'authority': effectiveAuthority.toLowerCase(),
       }),

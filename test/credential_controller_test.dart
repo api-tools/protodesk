@@ -164,6 +164,16 @@ void main() {
       expect(desk.invoking, false);
       expect(desk.history.length, 7);
       expect(desk.status, contains('Cancelled before credentials resolved'));
+      vault.pendingRead = null;
+      final reads = vault.reads;
+      desk.server = {
+        ...desk.server!,
+        'address': 'different-endpoint.example:443',
+      };
+      await desk.invoke();
+      expect(desk.status, contains('Reconnect before invoking'));
+      expect(vault.reads, reads);
+      expect(desk.history.length, 7);
     } finally {
       desk.dispose();
       await service.shutdown();

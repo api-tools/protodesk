@@ -88,6 +88,11 @@ void main() {
         tls: true,
         authority: 'alternate',
       ),
+      CredentialScope.metadata(
+        'example.com:443',
+        tls: true,
+        caFileReference: '/different/trust.pem',
+      ),
       CredentialScope.github('example', 'repository'),
     ]) {
       await expectLater(
