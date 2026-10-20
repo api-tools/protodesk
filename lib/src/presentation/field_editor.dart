@@ -52,7 +52,8 @@ class _FieldEditorState extends State<FieldEditor>
   bool get structured =>
       (field.type == 11 || field.type == 10) &&
       !map &&
-      !field.typeName.startsWith('google.protobuf.') &&
+      (!field.typeName.startsWith('google.protobuf.') ||
+          field.typeName == 'google.protobuf.Empty') &&
       !widget.ancestors.contains(field.typeName) &&
       widget.depth < 6;
   @override
@@ -82,6 +83,10 @@ class _FieldEditorState extends State<FieldEditor>
   bool get scalarWrapper =>
       field.typeName.startsWith('google.protobuf.') &&
       ProtoCodec.wrappers.containsKey(field.typeName.split('.').last);
+  bool get canSetEmpty =>
+      (!widget.present || widget.value == null) &&
+      ({9, 12}.contains(scalarType) ||
+          field.typeName == 'google.protobuf.FieldMask');
   int get scalarType => scalarWrapper
       ? ProtoCodec.wrappers[field.typeName.split('.').last]!
       : field.type;
@@ -233,7 +238,13 @@ class _FieldEditorState extends State<FieldEditor>
               ),
               IconButton(
                 tooltip: 'Set empty message',
-                onPressed: () => update(<String, Object?>{}),
+                onPressed: () {
+                  setState(() {
+                    structureRevision++;
+                    error = null;
+                  });
+                  update(<String, Object?>{});
+                },
                 icon: const Icon(Icons.add_box_outlined, size: 18),
               ),
               TextButton(
@@ -316,7 +327,8 @@ class _FieldEditorState extends State<FieldEditor>
       );
     }
     if (field.typeName == 'google.protobuf.NullValue') {
-      return Row(
+      return Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           const Text('null'),
           TextButton(
@@ -419,13 +431,16 @@ class _FieldEditorState extends State<FieldEditor>
                     },
                   )
                 : IconButton(
-                    tooltip: 'Unset field',
+                    tooltip: canSetEmpty ? 'Set empty value' : 'Unset field',
                     onPressed: () {
                       text.clear();
                       setState(() => error = null);
-                      update(unsetFieldValue);
+                      update(canSetEmpty ? '' : unsetFieldValue);
                     },
-                    icon: const Icon(Icons.clear, size: 16),
+                    icon: Icon(
+                      canSetEmpty ? Icons.add_box_outlined : Icons.clear,
+                      size: 16,
+                    ),
                   ),
           ),
           onChanged: (raw) {
