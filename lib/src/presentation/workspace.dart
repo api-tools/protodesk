@@ -12,6 +12,7 @@ import 'field_editor.dart';
 import 'response_tree.dart';
 import 'design.dart';
 import 'call_status.dart';
+import 'grpcurl.dart';
 
 class DeskWorkspace extends StatefulWidget {
   final DeskController desk;
@@ -49,6 +50,10 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
 
   void sync() {
     if (request.text != desk.body) request.text = desk.body;
+    if (timeout.text != desk.timeoutMs.toString()) {
+      timeout.text = desk.timeoutMs.toString();
+    }
+    if (authority.text != desk.authority) authority.text = desk.authority;
     if (mounted) setState(() {});
   }
 
@@ -220,6 +225,11 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       'Workspace',
                       Icons.import_export,
                       () => showWorkspace(context, desk),
+                    ),
+                    IconButton(
+                      tooltip: 'grpcurl import / export',
+                      icon: const Icon(Icons.terminal, size: 18),
+                      onPressed: () => showGrpcurl(context, desk),
                     ),
                     IconButton(
                       tooltip: 'About ProtoDesk',

@@ -16,9 +16,9 @@ def main():
         parent.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix='protodesk-credential-smoke-', dir=parent))
     settings = os.environ.copy()
-    for name in ('PROTODESK_SMOKE_ENDPOINT', 'PROTODESK_SMOKE_SOURCES',
-                 'PROTODESK_SMOKE_FRESH', 'PROTODESK_SMOKE_SOURCES_OFFLINE'):
-        settings.pop(name, None)
+    for name in tuple(settings):
+        if name.startswith('PROTODESK_SMOKE_'):
+            settings.pop(name)
     settings['PROTODESK_DATA_DIR'] = str(directory)
     settings['PROTODESK_SMOKE_CREDENTIALS'] = '1'
     try:

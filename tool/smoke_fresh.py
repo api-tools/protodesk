@@ -15,8 +15,9 @@ if sys.platform == 'darwin':
     parent.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix='protodesk-fresh-release-', dir=parent) as directory:
     settings = os.environ.copy()
-    settings.pop('PROTODESK_SMOKE_ENDPOINT', None)
-    settings.pop('PROTODESK_SMOKE_PROTO', None)
+    for name in tuple(settings):
+        if name.startswith('PROTODESK_SMOKE_'):
+            settings.pop(name)
     settings['PROTODESK_DATA_DIR'] = directory
     settings['PROTODESK_SMOKE_FRESH'] = '1'
     for _ in range(2):

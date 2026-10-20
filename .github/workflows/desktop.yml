@@ -59,6 +59,12 @@ jobs:
       - name: Compiled Linux smoke
         if: runner.os == 'Linux'
         run: xvfb-run -a python3 tool/smoke_release.py build/linux/x64/release/bundle/protodesk
+      - name: Compiled command interchange (macOS)
+        if: runner.os == 'macOS'
+        run: python3 tool/smoke_commands.py build/macos/Build/Products/Release/ProtoDesk.app/Contents/MacOS/ProtoDesk
+      - name: Compiled command interchange (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python3 tool/smoke_commands.py build/linux/x64/release/bundle/protodesk
       - name: Include redistributable Windows runtime
         if: runner.os == 'Windows'
         run: |
@@ -68,6 +74,9 @@ jobs:
       - name: Compiled Windows smoke
         if: runner.os == 'Windows'
         run: python tool/smoke_release.py build/windows/x64/runner/Release/protodesk.exe
+      - name: Compiled command interchange (Windows)
+        if: runner.os == 'Windows'
+        run: python tool/smoke_commands.py build/windows/x64/runner/Release/protodesk.exe
       - name: Package Linux
         if: runner.os == 'Linux'
         run: |

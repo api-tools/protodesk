@@ -119,6 +119,48 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'unsupported saved options require explicit replacement and cancel preserves data',
+    (tester) async {
+      final original = <String, Object?>{
+        'name': 'Future options',
+        'requestJson': '{}',
+        'requestOptionsJson': '{"version":999,"timeoutMs":42}',
+      };
+      Record? returned;
+      await host(tester, (context) async {
+        returned = await editRecord(
+          context,
+          desk,
+          'collection_requests',
+          original,
+        );
+      });
+      await tester.ensureVisible(find.text('Save').last);
+      await tester.tap(find.text('Save').last);
+      await tester.pumpAndSettle();
+      expect(returned, isNull);
+      expect(find.text('Cancel'), findsOneWidget);
+      await closeDialog(tester, 'Cancel');
+      expect(original['requestOptionsJson'], '{"version":999,"timeoutMs":42}');
+      await host(tester, (context) async {
+        returned = await editRecord(
+          context,
+          desk,
+          'collection_requests',
+          original,
+        );
+      });
+      final replace = find.text('Replace invalid call options on Save');
+      await tester.ensureVisible(replace);
+      await tester.tap(replace);
+      await tester.pumpAndSettle();
+      await closeDialog(tester, 'Save');
+      expect(returned, isNotNull);
+      expect(returned!['requestOptionsJson'], contains('5000'));
+    },
+  );
+
   testWidgets('create/edit/cancel records across repeated route transitions', (
     tester,
   ) async {

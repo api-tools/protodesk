@@ -12,6 +12,9 @@ import time
 root = pathlib.Path(__file__).resolve().parent.parent
 compiler = root / 'assets/protoc/bin' / ('protoc.exe' if os.name == 'nt' else 'protoc')
 settings = os.environ.copy()
+for name in tuple(settings):
+    if name.startswith('PROTODESK_SMOKE_'):
+        settings.pop(name)
 settings['PROTOC'] = str(compiler)
 if sys.platform == 'darwin':
     settings['PROTODESK_EXPECT_DATA_PATH'] = str(pathlib.Path.home() / 'Library/Application Support/ProtoDesk/protodesk.sqlite')

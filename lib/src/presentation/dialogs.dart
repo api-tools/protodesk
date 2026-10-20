@@ -10,6 +10,7 @@ import '../transport/engine.dart';
 import 'controller.dart';
 import 'credentials.dart';
 import '../security/credentials.dart';
+import '../request_options.dart';
 import 'design.dart';
 import 'proto_sources.dart';
 import '../sources/configuration.dart';
@@ -48,7 +49,7 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
   late String caFile, clientCertificateFile, clientKeyFile;
   String? error;
   late Map<String, Object?> sourceData;
-  String? sourceError, credentialError;
+  String? sourceError, credentialError, optionsError;
   late MetadataReferences rpcCredentials,
       reflectionCredentials,
       savedRequestCredentials;
@@ -63,10 +64,18 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
             'metadataJson',
             'reflectionMetadataJson',
             'tlsServerName',
+            'httpAuthority',
           ]
         : table == 'collections'
         ? ['name', 'description']
-        : ['name', 'requestJson', 'requestStreamJson', 'requestMetadataJson'];
+        : [
+            'name',
+            'requestJson',
+            'requestStreamJson',
+            'requestMetadataJson',
+            'timeoutMs',
+            'authority',
+          ];
     fields = {
       for (final key in keys)
         key: TextEditingController(
@@ -79,6 +88,18 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                   : ''),
         ),
     };
+    if (table == 'collection_requests') {
+      try {
+        final options = RequestOptions.decode(
+          record?['requestOptionsJson'] as String?,
+        );
+        fields['timeoutMs']!.text = (options?.timeoutMs ?? 5000).toString();
+        fields['authority']!.text = options?.authority ?? '';
+      } catch (_) {
+        fields['timeoutMs']!.text = '5000';
+        optionsError = 'Saved call options are unsupported or invalid. Original data remains intact; explicitly replace them after reviewing timeout and authority.';
+      }
+    }
     try {
       savedRequestCredentials = MetadataReferences.decode(
         record?['requestCredentialReferencesJson'] as String?,
@@ -198,12 +219,16 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                     helperMaxLines: 2,
                     helperText: switch (key) {
                       'reflectionMetadataJson' => 'Blank inherits RPC metadata. {} sends no reflection metadata.',
+                      'httpAuthority' => 'Applies to reflection and default RPCs. Call options override RPC authority only; SNI remains separate.',
                       'tlsServerName' => 'Set to separate TLS certificate verification from call authority. Blank preserves legacy behavior.',
                       _ => null,
                     },
                     labelText: switch (key) {
                       'reflectionMetadataJson' => 'Reflection metadata JSON',
+                      'httpAuthority' => 'Server authority (HTTP/2)',
                       'tlsServerName' => 'TLS server name / SNI',
+                      'timeoutMs' => 'Timeout (ms)',
+                      'authority' => 'Authority override (optional)',
                       _ => key,
                     },
                   ),
@@ -211,6 +236,13 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                   maxLines: key.endsWith('Json') ? 5 : 1,
                 ),
               ),
+            if (optionsError != null) ...[
+              Text(optionsError!, style: DeskType.secondary),
+              TextButton(
+                onPressed: () => setState(() => optionsError = null),
+                child: const Text('Replace invalid call options on Save'),
+              ),
+            ],
             if (credentialError != null) ...[
               Text(credentialError!, style: DeskType.secondary),
               TextButton(
@@ -232,6 +264,7 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                     'tlsEnabled': tls,
                     'tlsServerName': fields['tlsServerName']!.text,
                     'tlsCaFile': caFile,
+                    'httpAuthority': fields['httpAuthority']!.text,
                   }),
                   references: reflectionHeaders
                       ? reflectionCredentials
@@ -412,9 +445,26 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
             if (credentialError != null) {
               throw FormatException(credentialError!);
             }
+            if (optionsError != null) throw FormatException(optionsError!);
             final value = <String, Object?>{
               ...?record,
-              for (final e in fields.entries) e.key: e.value.text,
+              for (final e in fields.entries)
+                if (!['timeoutMs', 'authority'].contains(e.key) &&
+                    (e.key != 'httpAuthority' ||
+                        e.value.text.isNotEmpty ||
+                        record?.containsKey('httpAuthority') == true))
+                  e.key: e.value.text,
+              if (table == 'collection_requests' &&
+                  (record?.containsKey('requestOptionsJson') == true ||
+                      fields['timeoutMs']!.text != '5000' ||
+                      fields['authority']!.text.isNotEmpty))
+                'requestOptionsJson': RequestOptions(
+                  int.tryParse(fields['timeoutMs']!.text) ??
+                      (throw const FormatException(
+                        'Timeout must be an integer in milliseconds',
+                      )),
+                  fields['authority']!.text,
+                ).encode(),
               if (table == 'collection_requests' &&
                   (savedRequestCredentials.headers.isNotEmpty ||
                       record?.containsKey('requestCredentialReferencesJson') ==
