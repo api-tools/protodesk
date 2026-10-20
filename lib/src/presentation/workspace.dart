@@ -15,6 +15,7 @@ import 'call_status.dart';
 import 'grpcurl.dart';
 import 'preparation.dart';
 import 'diagnostics.dart';
+import 'updates.dart';
 
 class DeskWorkspace extends StatefulWidget {
   final DeskController desk;
@@ -287,6 +288,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                         context: context,
                         applicationName: 'ProtoDesk',
                         applicationVersion: applicationVersion,
+                        children: const [ReleaseAvailability()],
                         applicationLegalese:
                             'MIT License · © 2026 ProtoDesk contributors',
                       ),

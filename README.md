@@ -73,3 +73,5 @@ Call timelines and serialized protobuf metrics are documented in [Call diagnosti
 Restore per-method drafts and sent sequences, browse filtered/paginated history, and use guarded application shortcuts: [request workflow](docs/REQUEST_WORKFLOW.md).
 
 Use [named environments and reusable RPC metadata presets](docs/REQUEST_PREPARATION.md) to preview and explicitly apply typed request templates without changing active calls or stored snapshots.
+
+Manual release checks and the separate Windows signing assessment are documented in [release availability](docs/RELEASE_AVAILABILITY.md).
