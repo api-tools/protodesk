@@ -28,6 +28,11 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(ProtoDeskApp(desk: desk));
       expect(find.text('ProtoDesk'), findsOneWidget);
+      expect(find.text('Browse proto sources'), findsNothing);
+      expect(
+        find.text('Add a server in Servers to discover its APIs.'),
+        findsOneWidget,
+      );
       for (final label in [
         'Servers',
         'Collections',

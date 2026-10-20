@@ -716,6 +716,10 @@ void main() {
           services: [
             fixture,
             ReflectionFixture(registry, available: reflected),
+            // Refuse both reflection protocols through a draining handler.
+            // grpc's missing-route handler leaves the request stream paused,
+            // which can assert during HTTP/2 teardown on Windows.
+            ReflectionFixture(registry, version: 'v1alpha', available: false),
           ],
         );
         await server.serve(address: InternetAddress.loopbackIPv4, port: 0);
