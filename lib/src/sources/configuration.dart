@@ -122,7 +122,7 @@ String relativePath(String value, {bool allowEmpty = true}) {
   if (!RegExp(r'^https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$')
       .hasMatch(value)) {
     throw const FormatException(
-      'Use a public GitHub HTTPS repository URL without credentials or URL parameters',
+      'Use a GitHub HTTPS repository URL without credentials or URL parameters',
     );
   }
   final uri = Uri.tryParse(value);
@@ -135,7 +135,7 @@ String relativePath(String value, {bool allowEmpty = true}) {
       uri.hasFragment ||
       uri.pathSegments.length != 2) {
     throw const FormatException(
-      'Use a public https://github.com/owner/repository URL without credentials',
+      'Use a https://github.com/owner/repository URL without credentials',
     );
   }
   final owner = uri.pathSegments[0];

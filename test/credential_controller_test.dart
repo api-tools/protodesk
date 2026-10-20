@@ -7,6 +7,7 @@ import 'package:grpc/grpc.dart';
 import 'package:protodesk/src/persistence/store.dart';
 import 'package:protodesk/src/presentation/controller.dart';
 import 'package:protodesk/src/schema/proto_loader.dart';
+import 'package:protodesk/src/schema/schema.dart';
 import 'package:protodesk/src/security/credentials.dart';
 import 'package:protodesk/src/transport/engine.dart';
 
@@ -30,6 +31,34 @@ class ProtectedFixture extends FixtureService {
   }
 }
 
+class ObservedEngine extends GrpcEngine {
+  String? lastAuthority;
+  int? lastTimeout;
+  ObservedEngine(super.loader);
+  @override
+  Future<CallResult> invoke(
+    ProtoMethod method,
+    Object? body, {
+    Map<String, String> metadata = const {},
+    int timeoutMs = 5000,
+    String authority = '',
+    void Function(Object?)? onMessage,
+    void Function(Map<String, String>)? onHeaders,
+  }) {
+    lastAuthority = authority;
+    lastTimeout = timeoutMs;
+    return super.invoke(
+      method,
+      body,
+      metadata: metadata,
+      timeoutMs: timeoutMs,
+      authority: authority,
+      onMessage: onMessage,
+      onHeaders: onHeaders,
+    );
+  }
+}
+
 void main() {
   test('protected RPC headers are sent but only references enter history and replay; literal overrides remain explicit', () async {
     final loader = ProtoLoader(
@@ -46,11 +75,8 @@ void main() {
     );
     final store = WorkspaceStore.open('${directory.path}/data.sqlite');
     final vault = PendingVault();
-    final desk = DeskController(
-      store,
-      GrpcEngine(loader),
-      credentialVault: vault,
-    );
+    final engine = ObservedEngine(loader);
+    final desk = DeskController(store, engine, credentialVault: vault);
     try {
       final server = store.save('servers', {
         'name': 'Fixture',
@@ -118,13 +144,25 @@ void main() {
       }
       desk.selectMethod(desk.schema.methods['/runtime.fixture.Echo/Unary']!);
       vault.pendingRead = Completer<String?>();
+      final delayedCall = desk.invoke();
+      await Future<void>.delayed(Duration.zero);
+      desk.authority = 'different-virtual-host.example';
+      desk.timeoutMs = 1;
+      vault.pendingRead!.complete(vault.values[id]);
+      await delayedCall;
+      expect(desk.result!.code, 'OK');
+      expect(engine.lastAuthority, '');
+      expect(engine.lastTimeout, 5000);
+      desk.authority = '';
+      desk.timeoutMs = 5000;
+      vault.pendingRead = Completer<String?>();
       final pendingCall = desk.invoke();
       await Future<void>.delayed(Duration.zero);
       await desk.cancel();
       vault.pendingRead!.complete(vault.values[id]);
       await pendingCall;
       expect(desk.invoking, false);
-      expect(desk.history.length, 6);
+      expect(desk.history.length, 7);
       expect(desk.status, contains('Cancelled before credentials resolved'));
     } finally {
       desk.dispose();

@@ -425,6 +425,8 @@ class DeskController extends ChangeNotifier {
     final generation = ++_generation;
     final selected = method!;
     final request = body;
+    final callAuthority = authority;
+    final callTimeoutMs = timeoutMs;
     final selectedServer = {...server!};
     Map<String, String> headers;
     Map<String, String> literalHeaders;
@@ -494,7 +496,7 @@ class DeskController extends ChangeNotifier {
         headers = await usedReferences.resolve(
           literalHeaders,
           credentials,
-          credentialScope(selectedServer, authority: authority),
+          credentialScope(selectedServer, authority: callAuthority),
         );
       } finally {
         if (_resolvingCredentialGeneration == generation) {
@@ -506,8 +508,8 @@ class DeskController extends ChangeNotifier {
         requestStream = engine.startRequestStream(
           selected,
           metadata: headers,
-          timeoutMs: timeoutMs,
-          authority: authority,
+          timeoutMs: callTimeoutMs,
+          authority: callAuthority,
           onMessage: onMessage,
           onHeaders: onHeaders,
         );
@@ -531,8 +533,8 @@ class DeskController extends ChangeNotifier {
           selected,
           jsonDecode(request),
           metadata: headers,
-          timeoutMs: timeoutMs,
-          authority: authority,
+          timeoutMs: callTimeoutMs,
+          authority: callAuthority,
           onMessage: onMessage,
           onHeaders: onHeaders,
         );

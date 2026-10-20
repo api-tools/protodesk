@@ -26,7 +26,7 @@ Download the tested [current production release](https://github.com/api-tools/pr
 
 - macOS: extract `ProtoDesk.app`. Production `ProtoDesk-macos-universal.zip` is universal Intel/Apple Silicon, Developer ID signed, Apple notarized and stapled. Distinct `ProtoDesk-macos-development.zip` prereleases are ad-hoc signed and **not notarized**.
 - Windows x64: extract the entire ZIP and run `protodesk.exe`. The executable is **unsigned**; retain the DLLs and data directory beside it.
-- Linux x64: extract the archive and run `bundle/protodesk`. GTK 3 and the usual desktop system libraries must be installed. Protected credentials additionally require libsecret (`libsecret-1-0`) and a running Secret Service; public sources and literal headers do not require credential-store access.
+- Linux x64: extract the archive and run `bundle/protodesk`. GTK 3, libsecret (`libsecret-1-0`) and the usual desktop system libraries must be installed. Protected credentials additionally require a running Secret Service; public sources and literal headers do not require credential-store access.
 
 ## Local data
 
