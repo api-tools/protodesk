@@ -77,6 +77,13 @@ class ConnectionConfig {
     }
   }
 
+  /// Match gRPC's default authority, including omission of the HTTPS port.
+  String get defaultAuthority {
+    final (host, port) = endpoint;
+    final name = host.contains(':') && !host.startsWith('[') ? '[$host]' : host;
+    return port == 443 ? name : '$name:$port';
+  }
+
   (String, int) get endpoint {
     final uri = Uri.tryParse('http://$address');
     if (address.contains('://') ||
@@ -100,7 +107,7 @@ class _Connector implements ClientTransportConnector {
   Socket? socket;
   _Connector(this.config, this.overrideAuthority);
   @override
-  String get authority => overrideAuthority ?? config.address;
+  String get authority => overrideAuthority ?? config.defaultAuthority;
   @override
   Future<http2.ClientTransportConnection> connect() async {
     final connected = await config.openSocket(overrideAuthority);

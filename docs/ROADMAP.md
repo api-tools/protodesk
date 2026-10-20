@@ -5,8 +5,9 @@ Source: [issue #15](https://github.com/api-tools/protodesk/issues/15). Verified 
 ## Progress evidence
 
 - Phase 0: implemented on the enterprise-connections branch; production/development downloads, signing status and workspace v2 transfer wording aligned.
-- Phase 1: implemented locally; additive profile fields, PEM mTLS, explicit SNI and reflection-header inheritance. Full local suite passed (142 tests), analyzer and 12 packaging regressions passed. Native macOS mTLS reflection/RPC and minimum-window profile controls verified with isolated data. Review and cross-platform CI are pending; native picker completion was not claimed because another desktop workflow took input focus. See CONNECTION_SECURITY.md and test/mtls_test.dart.
+- Phase 1: implemented locally; additive profile fields, PEM mTLS, explicit SNI and reflection-header inheritance. Full local suite passed (143 tests), analyzer and 13 packaging regressions passed. Native macOS mTLS reflection/RPC and minimum-window profile controls verified with isolated data. Review and cross-platform CI are pending; native picker completion was not claimed because another desktop workflow took input focus. See CONNECTION_SECURITY.md and test/mtls_test.dart.
 - Phases 2–6: planned; not implemented or validated yet.
+- Review: [PR #16](https://github.com/api-tools/protodesk/pull/16). A default-port authority compatibility fix and manifest-derived About version were added during review.
 - Owner private endpoint: not tested.
 
 ## Baseline and scope

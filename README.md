@@ -50,7 +50,7 @@ flutter run -d macos   # or windows / linux on the matching OS
 dart format --output=none --set-exit-if-changed lib test tool
 flutter analyze
 flutter test
-flutter build macos --release   # or windows / linux
+python3 tool/build_desktop.py macos   # or windows / linux
 python3 tool/package_macos.py development  # explicit ad-hoc development ZIP
 ```
 

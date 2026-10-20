@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:grpc/grpc.dart';
@@ -48,6 +49,24 @@ class CapturedFixture extends FixtureService {
 }
 
 void main() {
+  test(
+    'default authority retains standard port normalization and IPv6 brackets',
+    () {
+      expect(
+        const ConnectionConfig('example.com:443').defaultAuthority,
+        'example.com',
+      );
+      expect(
+        const ConnectionConfig('example.com:8443').defaultAuthority,
+        'example.com:8443',
+      );
+      expect(const ConnectionConfig('[::1]:443').defaultAuthority, '[::1]');
+      expect(
+        const ConnectionConfig('[::1]:8443').defaultAuthority,
+        '[::1]:8443',
+      );
+    },
+  );
   final loader = ProtoLoader(
     compiler: Platform.environment['PROTOC'] ?? 'assets/protoc/bin/protoc',
     standardRoot: 'assets/protoc/include',
@@ -93,6 +112,17 @@ void main() {
             isNot(contains('DO_NOT_EXPOSE')),
           ),
         ),
+      );
+      key.writeAsStringSync(
+        '-----BEGIN PRIVATE KEY-----\n${base64.encode([0x30, ...List.filled(31, 0)])}\n-----END PRIVATE KEY-----',
+      );
+      await expectLater(
+        TlsIdentity.load('${root}client.pem', key.path),
+        throwsFormatException,
+      );
+      expect(
+        await TlsIdentity.load('${root}client.pem', '${root}client-key.pem'),
+        isNotNull,
       );
     } finally {
       await dir.delete(recursive: true);

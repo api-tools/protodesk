@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../build_info.dart';
 import 'controller.dart';
 import 'dialogs.dart';
 import 'field_editor.dart';
@@ -225,7 +226,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'ProtoDesk',
-                        applicationVersion: '1.0.4',
+                        applicationVersion: applicationVersion,
                         applicationLegalese:
                             'MIT License · © 2026 ProtoDesk contributors',
                       ),

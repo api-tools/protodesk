@@ -23,7 +23,7 @@ Production macOS distribution is established. Releases v1.0.5–v1.0.7 have veri
    ```sh
    cd /path/to/protodesk
    python3 tool/package_macos.py check
-   flutter build macos --release
+   python3 tool/build_desktop.py macos
    sh tool/package_macos.sh
    ```
 
