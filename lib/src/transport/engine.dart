@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:grpc/grpc.dart';
+import 'package:http2/transport.dart' as http2;
+
+import 'tls_identity.dart';
 
 import '../schema/schema.dart';
 import '../schema/codec.dart';
@@ -14,6 +17,9 @@ class ConnectionConfig {
   final bool tls, reflection;
   final List<String> files, folders;
   final Map<String, String> metadata;
+  final Map<String, String>? reflectionMetadata;
+  final TlsIdentity? identity;
+  final String serverName;
   final List<int>? certificates;
   final SchemaRegistry? localSchema;
   final Future<SchemaRegistry> Function()? schemaProvider;
@@ -25,9 +31,59 @@ class ConnectionConfig {
     this.folders = const [],
     this.metadata = const {},
     this.certificates,
+    this.identity,
+    this.serverName = '',
+    this.reflectionMetadata,
     this.localSchema,
     this.schemaProvider,
   });
+  SecurityContext? get securityContext {
+    if (!tls) {
+      if (identity != null) {
+        throw const FormatException('Client identity requires TLS');
+      }
+      return null;
+    }
+    if (identity != null) return identity!.context(certificates);
+    final context = SecurityContext(withTrustedRoots: certificates == null);
+    if (certificates != null) {
+      context.setTrustedCertificatesBytes(certificates!);
+    }
+    context.setAlpnProtocols(['h2'], false);
+    return context;
+  }
+
+  Future<Socket> openSocket([String? authority]) async {
+    final (host, port) = endpoint;
+    final context = securityContext;
+    final socket = await Socket.connect(
+      host,
+      port,
+      timeout: const Duration(seconds: 5),
+    );
+    if (context == null) return socket;
+    try {
+      // Preserve the legacy authority-as-TLS-name behavior unless an explicit
+      // TLS server name is configured. HTTP/2 authority remains independent.
+      return await SecureSocket.secure(
+        socket,
+        host: serverName.isNotEmpty ? serverName : authority ?? host,
+        context: context,
+        supportedProtocols: ['h2'],
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {
+      socket.destroy();
+      rethrow;
+    }
+  }
+
+  /// Match gRPC's default authority, including omission of the HTTPS port.
+  String get defaultAuthority {
+    final (host, port) = endpoint;
+    final name = host.contains(':') && !host.startsWith('[') ? '[$host]' : host;
+    return port == 443 ? name : '$name:$port';
+  }
+
   (String, int) get endpoint {
     final uri = Uri.tryParse('http://$address');
     if (address.contains('://') ||
@@ -43,6 +99,27 @@ class ConnectionConfig {
     }
     return (uri.host, uri.port);
   }
+}
+
+class _Connector implements ClientTransportConnector {
+  final ConnectionConfig config;
+  final String? overrideAuthority;
+  Socket? socket;
+  _Connector(this.config, this.overrideAuthority);
+  @override
+  String get authority => overrideAuthority ?? config.defaultAuthority;
+  @override
+  Future<http2.ClientTransportConnection> connect() async {
+    final connected = await config.openSocket(overrideAuthority);
+    socket = connected;
+    connected.setOption(SocketOption.tcpNoDelay, true);
+    return http2.ClientTransportConnection.viaSocket(connected);
+  }
+
+  @override
+  Future get done => socket?.done ?? Future.value();
+  @override
+  void shutdown() => socket?.destroy();
 }
 
 class DiscoveryResult {
@@ -188,7 +265,7 @@ class RequestStreamCall {
 
 class GrpcEngine {
   final ProtoLoader loader;
-  ClientChannel? _channel;
+  ClientTransportConnectorChannel? _channel;
   ConnectionConfig? _config;
   SchemaRegistry schema = SchemaRegistry();
   final _calls = <ResponseStream<List<int>>>{};
@@ -211,19 +288,17 @@ class GrpcEngine {
     await channel?.shutdown();
   }
 
-  ClientChannel _create(ConnectionConfig config, [String? authority]) {
-    final (host, port) = config.endpoint;
-    return ClientChannel(
-      host,
-      port: port,
+  ClientTransportConnectorChannel _create(
+    ConnectionConfig config, [
+    String? authority,
+  ]) {
+    return ClientTransportConnectorChannel(
+      _Connector(config, authority),
       options: ChannelOptions(
         connectTimeout: const Duration(seconds: 5),
         credentials: config.tls
-            ? ChannelCredentials.secure(
-                certificates: config.certificates,
-                authority: authority,
-              )
-            : ChannelCredentials.insecure(authority: authority),
+            ? const ChannelCredentials.secure()
+            : const ChannelCredentials.insecure(),
       ),
     );
   }
@@ -231,21 +306,19 @@ class GrpcEngine {
   Future<DiscoveryResult> connect(ConnectionConfig config) async {
     await disconnect();
     final generation = _generation;
-    final (host, port) = config.endpoint;
-    // Probe with the same TLS trust rules before recording a connected state.
-    final socket = config.tls
-        ? await SecureSocket.connect(
-            host,
-            port,
-            timeout: const Duration(seconds: 5),
-            context: config.certificates == null
-                ? null
-                : (SecurityContext()
-                    ..setTrustedCertificatesBytes(config.certificates!)),
-            supportedProtocols: ['h2'],
-          )
-        : await Socket.connect(host, port, timeout: const Duration(seconds: 5));
-    socket.destroy();
+    // The probe and every gRPC channel use the same trust and client identity.
+    final socket = await config.openSocket();
+    // TLS 1.3 can return the client socket before the peer rejects its client
+    // identity. Receiving HTTP/2 SETTINGS proves the peer accepted the session,
+    // without invoking a health method, application RPC or keepalive PING.
+    final probe = http2.ClientTransportConnection.viaSocket(socket);
+    try {
+      await probe.onInitialPeerSettingsReceived.timeout(
+        const Duration(seconds: 5),
+      );
+    } finally {
+      socket.destroy();
+    }
     if (generation != _generation) {
       throw const GrpcError.cancelled('Connection superseded');
     }
@@ -258,7 +331,10 @@ class GrpcEngine {
     try {
       if (config.reflection) {
         try {
-          registry = await _reflect(channel, config.metadata);
+          registry = await _reflect(
+            channel,
+            config.reflectionMetadata ?? config.metadata,
+          );
           source = 'reflection';
         } catch (e) {
           warning = 'Reflection unavailable: $e';
@@ -298,7 +374,7 @@ class GrpcEngine {
   }
 
   Future<SchemaRegistry> _reflect(
-    ClientChannel channel,
+    ClientTransportConnectorChannel channel,
     Map<String, String> metadata,
   ) async {
     Object? last;

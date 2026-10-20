@@ -40,3 +40,13 @@ class RegistrantConfigTest(unittest.TestCase):
         self.assertEqual(result, registrant_config(result))
         self.assertEqual(result['packages'][1]['rootUri'], 'flutter_build/')
         self.assertEqual(len(source['packages']), 1)
+
+
+class ReleaseVersionTest(unittest.TestCase):
+    def test_version_comes_from_manifest_and_invalid_labels_fail_closed(self):
+        from build_desktop import application_version
+        self.assertEqual(application_version('name: protodesk\nversion: 1.2.3+4\n'), '1.2.3+4')
+        self.assertEqual(application_version('version: 1.2.3-dev.1+4 # candidate\n'), '1.2.3-dev.1+4')
+        for value in ['name: protodesk', 'version: unknown', 'version: 1.2', 'version: 1.2.3+shell;command']:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                application_version(value)

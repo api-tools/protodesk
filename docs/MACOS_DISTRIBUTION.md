@@ -1,6 +1,6 @@
 # Developer ID distribution setup
 
-The pipeline is prepared; successful Developer ID signing/notarization must be established locally before the first public signed release. The existing public macOS downloads remain ad-hoc releases until a verified replacement is published. No signing/notarization completion is claimed by this setup document.
+Production macOS distribution is established. Releases v1.0.5–v1.0.7 have verified Developer ID signed, Apple Accepted and stapled universal packages. Each new production release must repeat the fail-closed checks below; a previous acceptance is not evidence for a new binary.
 
 ## Local credentials — keep all secrets on your computer
 
@@ -23,7 +23,7 @@ The pipeline is prepared; successful Developer ID signing/notarization must be e
    ```sh
    cd /path/to/protodesk
    python3 tool/package_macos.py check
-   flutter build macos --release
+   python3 tool/build_desktop.py macos
    sh tool/package_macos.sh
    ```
 

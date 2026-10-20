@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../transport/engine.dart';
+import '../transport/tls_identity.dart';
 import '../schema/schema.dart';
 import '../schema/codec.dart';
 import '../sources/manager.dart';
@@ -138,6 +139,12 @@ class DeskController extends ChangeNotifier {
         return schema;
       }
 
+      final identity = await TlsIdentity.load(
+        s['tlsClientCertificateFile'] as String? ?? '',
+        s['tlsClientKeyFile'] as String? ?? '',
+      );
+      final reflectionJson = (s['reflectionMetadataJson'] as String? ?? '')
+          .trim();
       List<int>? certificates;
       final caFile = s['tlsCaFile'] as String? ?? '';
       if (s['tlsEnabled'] == true && caFile.isNotEmpty) {
@@ -158,6 +165,11 @@ class DeskController extends ChangeNotifier {
           s['address'] as String,
           tls: s['tlsEnabled'] == true,
           certificates: certificates,
+          identity: identity,
+          serverName: (s['tlsServerName'] as String? ?? '').trim(),
+          reflectionMetadata: reflectionJson.isEmpty
+              ? null
+              : parseMetadata(reflectionJson),
           reflection: s['reflectionEnabled'] != false,
           schemaProvider: compileLocal,
           metadata: parseMetadata(s['metadataJson'] as String? ?? '{}'),

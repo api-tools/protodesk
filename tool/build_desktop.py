@@ -2,6 +2,7 @@
 """Build a desktop release without embedding machine-specific registrant URIs."""
 import argparse
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,6 +22,13 @@ def registrant_config(config):
     return config
 
 
+def application_version(contents):
+    match = re.search(r'^version:\s*([0-9][0-9A-Za-z.+-]*)\s*(?:#.*)?$', contents, re.MULTILINE)
+    if not match or not re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+\d+)?', match[1]):
+        raise ValueError('pubspec.yaml must declare a supported semantic application version')
+    return match[1]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target', choices=['macos', 'windows', 'linux'])
@@ -35,7 +43,8 @@ def main():
     try:
         path.write_text(json.dumps(registrant_config(json.loads(original)), indent=2) + '\n')
         subprocess.run([flutter, 'build', args.target, '--release', '--no-pub',
-                        '--split-debug-info=build/symbols'], cwd=ROOT, check=True)
+                        '--split-debug-info=build/symbols',
+                        '--dart-define=PROTODESK_VERSION=' + application_version((ROOT / 'pubspec.yaml').read_text())], cwd=ROOT, check=True)
     finally:
         path.write_bytes(original)
 

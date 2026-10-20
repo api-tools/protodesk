@@ -43,7 +43,7 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
   late final Map<String, TextEditingController> fields;
   late final List<String> files, folders;
   late bool tls, reflection;
-  late String caFile;
+  late String caFile, clientCertificateFile, clientKeyFile;
   String? error;
   late Map<String, Object?> sourceData;
   String? sourceError;
@@ -52,7 +52,13 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
   void initState() {
     super.initState();
     final keys = table == 'servers'
-        ? ['name', 'address', 'metadataJson']
+        ? [
+            'name',
+            'address',
+            'metadataJson',
+            'reflectionMetadataJson',
+            'tlsServerName',
+          ]
         : table == 'collections'
         ? ['name', 'description']
         : ['name', 'requestJson', 'requestStreamJson', 'requestMetadataJson'];
@@ -61,7 +67,9 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
         key: TextEditingController(
           text:
               record?[key]?.toString() ??
-              (key.endsWith('Json')
+              (key == 'reflectionMetadataJson'
+                  ? ''
+                  : key.endsWith('Json')
                   ? (key == 'requestStreamJson' ? '[]' : '{}')
                   : ''),
         ),
@@ -71,6 +79,9 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
     files = (record?['protoFiles'] as List? ?? []).cast<String>().toList();
     folders = (record?['protoFolders'] as List? ?? []).cast<String>().toList();
     caFile = record?['tlsCaFile'] as String? ?? '';
+    clientCertificateFile =
+        record?['tlsClientCertificateFile'] as String? ?? '';
+    clientKeyFile = record?['tlsClientKeyFile'] as String? ?? '';
     try {
       sourceData = SourceConfiguration.fromRecord(record ?? {}).data;
     } catch (e) {
@@ -86,6 +97,59 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
     }
     super.dispose();
   }
+
+  Widget identityFile(
+    String label,
+    String path,
+    void Function(String) update,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SelectableText(
+        path.isEmpty ? '$label: not configured' : path,
+        style: DeskType.secondary,
+      ),
+      Wrap(
+        spacing: 8,
+        children: [
+          TextButton(
+            onPressed: () async {
+              try {
+                final file = await openFile(
+                  acceptedTypeGroups: [
+                    const XTypeGroup(
+                      label: 'PEM',
+                      extensions: ['pem', 'crt', 'key'],
+                    ),
+                  ],
+                );
+                if (!mounted || file == null) return;
+                if (Platform.isMacOS) {
+                  await const MethodChannel('dev.apitools.protodesk/storage')
+                      .invokeMethod<void>('rememberPath', file.path);
+                }
+                if (!mounted) return;
+                setState(() => update(file.path));
+              } catch (_) {
+                if (mounted) {
+                  setState(
+                    () => error =
+                        'Could not access $label. Reselect the file and grant access.',
+                  );
+                }
+              }
+            },
+            child: Text('Choose $label'),
+          ),
+          if (path.isNotEmpty)
+            TextButton(
+              onPressed: () => setState(() => update('')),
+              child: Text('Clear $label'),
+            ),
+        ],
+      ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -109,7 +173,19 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                 child: TextField(
                   controller: fields[key],
                   style: key.endsWith('Json') ? DeskType.code : DeskType.body,
-                  decoration: InputDecoration(labelText: key),
+                  decoration: InputDecoration(
+                    helperMaxLines: 2,
+                    helperText: switch (key) {
+                      'reflectionMetadataJson' => 'Blank inherits RPC metadata. {} sends no reflection metadata.',
+                      'tlsServerName' => 'Set to separate TLS certificate verification from call authority. Blank preserves legacy behavior.',
+                      _ => null,
+                    },
+                    labelText: switch (key) {
+                      'reflectionMetadataJson' => 'Reflection metadata JSON',
+                      'tlsServerName' => 'TLS server name / SNI',
+                      _ => key,
+                    },
+                  ),
                   minLines: key.endsWith('Json') ? 3 : 1,
                   maxLines: key.endsWith('Json') ? 5 : 1,
                 ),
@@ -123,7 +199,37 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
                 value: tls,
                 onChanged: (v) => setState(() => tls = v),
               ),
+              if (!tls &&
+                  (clientCertificateFile.isNotEmpty ||
+                      clientKeyFile.isNotEmpty)) ...[
+                const Text(
+                  'Configured client identity requires TLS. Enable TLS or explicitly clear the identity.',
+                  style: DeskType.secondary,
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    clientCertificateFile = '';
+                    clientKeyFile = '';
+                  }),
+                  child: const Text('Clear client identity'),
+                ),
+              ],
               if (tls) ...[
+                const Text('Client identity (mTLS)', style: DeskType.heading),
+                const Text(
+                  'Optional PEM chain and matching unencrypted PEM key. Only file references are saved.',
+                  style: DeskType.secondary,
+                ),
+                identityFile(
+                  'client certificate',
+                  clientCertificateFile,
+                  (v) => clientCertificateFile = v,
+                ),
+                identityFile(
+                  'client private key',
+                  clientKeyFile,
+                  (v) => clientKeyFile = v,
+                ),
                 const Text('TLS trust', style: DeskType.heading),
                 SelectableText(
                   caFile.isEmpty ? 'System trust roots' : caFile,
@@ -208,6 +314,8 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
               if (table == 'servers') ...{
                 'tlsEnabled': tls,
                 'tlsCaFile': caFile,
+                'tlsClientCertificateFile': clientCertificateFile,
+                'tlsClientKeyFile': clientKeyFile,
                 'reflectionEnabled': reflection,
                 'protoSources': SourceConfiguration(sourceData).data,
                 'protoFiles': (sourceData['sources'] as List)
@@ -228,6 +336,16 @@ class _EditRecordDialogState extends State<_EditRecordDialog> {
               value.remove('protoFoldersJson');
               ConnectionConfig(value['address'] as String).endpoint;
               DeskController.parseMetadata(value['metadataJson'] as String);
+              final reflection = value['reflectionMetadataJson'] as String;
+              if (reflection.trim().isNotEmpty) {
+                DeskController.parseMetadata(reflection);
+              }
+              if (tls &&
+                  clientCertificateFile.isEmpty != clientKeyFile.isEmpty) {
+                throw const FormatException(
+                  'Select both client certificate and private key, or clear both',
+                );
+              }
             }
             if (table == 'collection_requests') {
               jsonDecode(value['requestJson'] as String);
@@ -739,7 +857,7 @@ Future<void> previewRequest(
 
 Future<void> showWorkspace(BuildContext context, DeskController desk) async {
   String message =
-      'Version 1 · Servers, proto references, collections, and examples. History is excluded. Imports create new records.';
+      'Version 2 export · Version 1/2 import · Servers, proto references, collections, and examples. History is excluded. Imports create new records.';
   await showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(

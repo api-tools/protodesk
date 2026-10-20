@@ -9,7 +9,7 @@ Choose a server → browse services and methods → edit a request → invoke �
 - Resizable three-pane dark workspace, service/method filtering, shared Satoshi typography, compact 36 px controls, and Roboto Mono JSON/code. Service and method rows use consistent spacing.
 - Searchable, collapsible JSON responses with quoted keys/values, expand/collapse all, full JSON copy, highlighted matches and ancestor context. Clearing search restores expansion; each call starts with fresh expansion state.
 - gRPC status, duration, message count and live stream state in the footer. Response headers/trailers open in a compact secondary dialog with copy and empty states; request metadata stays editable.
-- Plaintext or verified TLS connections, reflection v1/v1alpha, request headers, deadlines, and optional authority overrides.
+- Plaintext or verified TLS connections, optional PEM mTLS client identity, separate reflection/RPC metadata, reflection v1/v1alpha, request headers, deadlines, and optional SNI/authority overrides. See [connection security](docs/CONNECTION_SECURITY.md).
 - Reflection-first API discovery with offline local/Git schema fallback. Combine native file/folder imports and public GitHub repositories by branch/tag/commit, select entry points, configure independent import roots, validate with bundled protoc, and reuse validated revisions offline. Persistent file access on macOS. See [source management](docs/PROTOBUF_SOURCES.md).
 - Runtime protobuf descriptors and JSON encoding: user APIs do not need generated application classes. Supports scalar types, 64-bit string integers, bytes, enums, maps, repeated/nested/recursive messages, oneofs, presence, and well-known JSON types.
 - Schema-aware Form/JSON editing, individual repeated-item controls, enum and boolean controls, timestamp date/time selection, and validation that retains invalid local drafts.
@@ -20,9 +20,9 @@ Proto2/proto3 schemas are supported; protobuf editions are currently rejected wi
 
 ## Downloads
 
-Download the tested [1.0.4 development patch](https://github.com/api-tools/protodesk/releases/tag/dev-v1.0.4) or browse [Releases](https://github.com/api-tools/protodesk/releases). Development releases use `dev-v*` tags and are explicitly marked as prereleases; production `v*` tags retain the separate fail-closed signing/notarization gate. End users do not need Flutter, Dart, or protoc.
+Download the tested [current production release](https://github.com/api-tools/protodesk/releases/latest) or browse [Releases](https://github.com/api-tools/protodesk/releases). Development releases use `dev-v*` tags and are explicitly marked as prereleases; production `v*` tags retain the separate fail-closed signing/notarization gate. End users do not need Flutter, Dart, or protoc.
 
-- macOS: extract `ProtoDesk.app`. Universal Intel/Apple Silicon app (`ProtoDesk-macos-development.zip` for development releases), ad-hoc signed, **not notarized**. macOS may require explicit approval to open an app downloaded outside the App Store.
+- macOS: extract `ProtoDesk.app`. Production `ProtoDesk-macos-universal.zip` is universal Intel/Apple Silicon, Developer ID signed, Apple notarized and stapled. Distinct `ProtoDesk-macos-development.zip` prereleases are ad-hoc signed and **not notarized**.
 - Windows x64: extract the entire ZIP and run `protodesk.exe`. The executable is **unsigned**; retain the DLLs and data directory beside it.
 - Linux x64: extract the archive and run `bundle/protodesk`. GTK 3 and the usual desktop system libraries must be installed.
 
@@ -50,11 +50,11 @@ flutter run -d macos   # or windows / linux on the matching OS
 dart format --output=none --set-exit-if-changed lib test tool
 flutter analyze
 flutter test
-flutter build macos --release   # or windows / linux
+python3 tool/build_desktop.py macos   # or windows / linux
 python3 tool/package_macos.py development  # explicit ad-hoc development ZIP
 ```
 
-Developer ID distribution is prepared separately and requires real local credentials and notarization evidence before publication; see [the signing setup guide](docs/MACOS_DISTRIBUTION.md). Apple credential setup and final signed distribution are deferred. Development releases do not need those credentials; their ad-hoc macOS status is explicit.
+Production Developer ID distribution requires Apple Accepted, stapling and extracted-package verification; see [the distribution guide](docs/MACOS_DISTRIBUTION.md). Existing signed production releases include checksum-bound notarization receipts. Development releases do not need those credentials; their ad-hoc macOS status is explicit.
 
 Tests use a new Dart fixture service and an API schema loaded at runtime. They cover wire interoperability with protoc, reflection variants, proto-only discovery, unary errors and deadlines, TLS trust, metadata, streaming completion/failure/cancellation/limits, request editors, SQLite persistence, and transactional workspace transfer. CI builds and exercises compiled releases separately on all three operating systems.
 
