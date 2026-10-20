@@ -8,6 +8,8 @@ import 'package:uuid/uuid.dart';
 import '../sources/configuration.dart';
 import '../security/credentials.dart';
 import '../security/redaction.dart';
+import '../endpoint.dart';
+import '../request_options.dart';
 
 typedef Record = Map<String, Object?>;
 
@@ -24,6 +26,7 @@ class WorkspaceStore {
       'tlsClientCertificateFile',
       'tlsClientKeyFile',
       'tlsServerName',
+      'httpAuthority',
       'reflectionMetadataJson',
       'metadataReferencesJson',
       'reflectionMetadataReferencesJson',
@@ -46,6 +49,7 @@ class WorkspaceStore {
       'requestStreamJson',
       'requestMetadataJson',
       'requestCredentialReferencesJson',
+      'requestOptionsJson',
       'responseJson',
       'statusCode',
       'statusMessage',
@@ -75,6 +79,7 @@ class WorkspaceStore {
       'requestStreamJson',
       'requestMetadataJson',
       'requestCredentialReferencesJson',
+      'requestOptionsJson',
       'createdAt',
       'updatedAt',
     ],
@@ -132,6 +137,7 @@ class WorkspaceStore {
             'metadataReferencesJson',
             'reflectionMetadataReferencesJson',
             'requestCredentialReferencesJson',
+            'requestOptionsJson',
           ]) {
             if (table.value.contains(key) &&
                 !existingReferenceColumns.contains(snake(key))) {
@@ -149,6 +155,7 @@ class WorkspaceStore {
               'tls_client_certificate_file',
               'tls_client_key_file',
               'tls_server_name',
+              'http_authority',
               'reflection_metadata_json',
             ]) {
               if (!existing.contains(name)) {
@@ -345,6 +352,9 @@ class WorkspaceStore {
         MetadataReferences.decode(record[key] as String?);
       }
     }
+    if (columns[table]!.contains('requestOptionsJson')) {
+      RequestOptions.decode(record['requestOptionsJson'] as String?);
+    }
     if (table == 'credentials') {
       CredentialScope.decode(jsonDecode(record['scopeJson'] as String));
       if (!['pending', 'ready', 'unavailable'].contains(record['state'])) {
@@ -374,16 +384,8 @@ class WorkspaceStore {
           (record['address'] ?? '').toString().trim().isEmpty) {
         throw const FormatException('Server name and address are required');
       }
-      final endpoint = Uri.tryParse('http://${record['address']}');
-      if (endpoint == null ||
-          endpoint.host.isEmpty ||
-          !endpoint.hasPort ||
-          endpoint.port < 1 ||
-          endpoint.port > 65535 ||
-          endpoint.path.isNotEmpty ||
-          (record['address'] as String).contains('://')) {
-        throw const FormatException('Server address must be host:port');
-      }
+      parseServerAddress(record['address'] as String);
+      validateGrpcAuthority(record['httpAuthority'] as String? ?? '');
       for (final key in ['protoFiles', 'protoFolders']) {
         if (record[key] == null && record['${key}Json'] != null) {
           record[key] = SourceConfiguration.strings(

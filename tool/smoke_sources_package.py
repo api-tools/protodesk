@@ -14,6 +14,9 @@ import tempfile
 
 def run(executable, directory, config, *, offline=False):
     env = os.environ.copy()
+    for name in tuple(env):
+        if name.startswith('PROTODESK_SMOKE_'):
+            env.pop(name)
     env['PROTODESK_DATA_DIR'] = str(directory)
     env['PROTODESK_SMOKE_SOURCES'] = json.dumps(config)
     env['PROTODESK_SMOKE_SOURCES_OFFLINE'] = '1' if offline else '0'

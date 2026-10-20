@@ -1,3 +1,5 @@
+import '../endpoint.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -19,7 +21,7 @@ class ConnectionConfig {
   final Map<String, String> metadata;
   final Map<String, String>? reflectionMetadata;
   final TlsIdentity? identity;
-  final String serverName;
+  final String serverName, httpAuthority;
   final List<int>? certificates;
   final SchemaRegistry? localSchema;
   final Future<SchemaRegistry> Function()? schemaProvider;
@@ -33,6 +35,7 @@ class ConnectionConfig {
     this.certificates,
     this.identity,
     this.serverName = '',
+    this.httpAuthority = '',
     this.reflectionMetadata,
     this.localSchema,
     this.schemaProvider,
@@ -79,26 +82,13 @@ class ConnectionConfig {
 
   /// Match gRPC's default authority, including omission of the HTTPS port.
   String get defaultAuthority {
+    validateGrpcAuthority(httpAuthority);
+    if (httpAuthority.isNotEmpty) return httpAuthority;
     final (host, port) = endpoint;
-    final name = host.contains(':') && !host.startsWith('[') ? '[$host]' : host;
-    return port == 443 ? name : '$name:$port';
+    return grpcAuthority(host, port);
   }
 
-  (String, int) get endpoint {
-    final uri = Uri.tryParse('http://$address');
-    if (address.contains('://') ||
-        uri == null ||
-        uri.host.isEmpty ||
-        !uri.hasPort ||
-        uri.port < 1 ||
-        uri.port > 65535 ||
-        uri.path.isNotEmpty) {
-      throw const FormatException(
-        'Server address must be host:port (port 1–65535)',
-      );
-    }
-    return (uri.host, uri.port);
-  }
+  (String, int) get endpoint => parseServerAddress(address);
 }
 
 class _Connector implements ClientTransportConnector {

@@ -20,6 +20,8 @@ Proto2/proto3 schemas are supported; protobuf editions are currently rejected wi
 
 See [protected credentials](docs/CREDENTIALS.md) for OS-store references, explicit literal migration, private GitHub access and safe workspace/diagnostic exports.
 
+Use the toolbar terminal icon for [safe grpcurl import/export](docs/GRPCURL_INTERCHANGE.md), including explicit sensitive-data choices, native file references and saved request options.
+
 ## Downloads
 
 Download the tested [current production release](https://github.com/api-tools/protodesk/releases/latest) or browse [Releases](https://github.com/api-tools/protodesk/releases). Development releases use `dev-v*` tags and are explicitly marked as prereleases; production `v*` tags retain the separate fail-closed signing/notarization gate. End users do not need Flutter, Dart, or protoc.

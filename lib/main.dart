@@ -19,6 +19,7 @@ import 'src/sources/configuration.dart';
 import 'src/sources/manager.dart';
 import 'src/sources/git_provider.dart';
 import 'src/security/smoke.dart';
+import 'src/interchange/smoke.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,6 +71,18 @@ Future<void> main() async {
         ? await const MethodChannel('dev.apitools.protodesk/storage')
               .invokeMethod<String>('dataPath')
         : WorkspaceStore.defaultPath();
+    if (Platform.environment['PROTODESK_SMOKE_COMMANDS'] == '1') {
+      await smokeCommands(
+        ProtoLoader(
+          compiler: compiler,
+          standardRoot: p.join(directory.path, 'include'),
+        ),
+        directory,
+        dataPath!,
+      );
+      await directory.delete(recursive: true);
+      exit(0);
+    }
     if (Platform.environment['PROTODESK_SMOKE_CREDENTIALS'] == '1') {
       await smokeNativeCredentials(dataPath!);
       await directory.delete(recursive: true);
@@ -151,7 +164,8 @@ Future<void> main() async {
     }
     runApp(ProtoDeskApp(desk: desk, tools: directory));
   } catch (e) {
-    if (Platform.environment['PROTODESK_SMOKE_CREDENTIALS'] == '1' ||
+    if (Platform.environment['PROTODESK_SMOKE_COMMANDS'] == '1' ||
+        Platform.environment['PROTODESK_SMOKE_CREDENTIALS'] == '1' ||
         Platform.environment.containsKey('PROTODESK_SMOKE_SOURCES') ||
         Platform.environment.containsKey('PROTODESK_SMOKE_ENDPOINT') ||
         Platform.environment['PROTODESK_SMOKE_FRESH'] == '1') {

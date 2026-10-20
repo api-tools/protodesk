@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../endpoint.dart';
+
 /// Fixed error messages intentionally exclude platform errors, tokens and URLs.
 class CredentialFailure implements Exception {
   final String message;
@@ -35,27 +37,26 @@ class CredentialScope {
     String serverName = '',
     String authority = '',
     String caFileReference = '',
+    String httpAuthority = '',
   }) {
-    final uri = Uri.tryParse('http://$address');
-    if (address.contains('://') ||
-        uri == null ||
-        uri.host.isEmpty ||
-        !uri.hasPort ||
-        uri.port < 1 ||
-        uri.port > 65535 ||
-        uri.path.isNotEmpty ||
-        uri.userInfo.isNotEmpty ||
-        uri.hasQuery ||
-        uri.hasFragment) {
+    late String host;
+    late int port;
+    try {
+      validateGrpcAuthority(httpAuthority);
+      final endpoint = parseServerAddress(address);
+      host = endpoint.$1.toLowerCase();
+      port = endpoint.$2;
+    } catch (_) {
       throw CredentialFailure.invalid;
     }
     if (caFileReference.length > 4096 ||
         caFileReference.codeUnits.any((c) => c < 32 || c == 127)) {
       throw CredentialFailure.invalid;
     }
-    final host = uri.host.toLowerCase();
     final name = host.contains(':') && !host.startsWith('[') ? '[$host]' : host;
-    final defaultAuthority = uri.port == 443 ? name : '$name:${uri.port}';
+    final defaultAuthority = httpAuthority.isEmpty
+        ? grpcAuthority(host, port)
+        : httpAuthority;
     final effectiveAuthority = authority.isEmpty ? defaultAuthority : authority;
     final effectiveName = serverName.trim().isNotEmpty
         ? serverName.trim()
@@ -71,7 +72,7 @@ class CredentialScope {
     return CredentialScope._(
       CredentialKind.metadata,
       jsonEncode({
-        'endpoint': '$name:${uri.port}',
+        'endpoint': '$name:$port',
         'tls': tls,
         'caFile': tls ? caFileReference : '',
         'serverName': tls ? effectiveName.toLowerCase() : '',

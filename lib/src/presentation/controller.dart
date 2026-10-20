@@ -14,6 +14,8 @@ import '../security/credentials.dart';
 import '../security/catalog.dart';
 import '../security/native_vault.dart';
 import '../security/redaction.dart';
+import '../security/metadata.dart';
+import '../request_options.dart';
 
 const pretty = JsonEncoder.withIndent('  ');
 
@@ -25,6 +27,7 @@ class DeskController extends ChangeNotifier {
   MetadataReferences requestCredentials = MetadataReferences({});
   int? _resolvingCredentialGeneration;
   CredentialScope? _connectedRecipient;
+  String? _importedMethod;
   List<Record> servers = [], collections = [], history = [];
   Record? server;
   SchemaRegistry schema = SchemaRegistry();
@@ -74,9 +77,41 @@ class DeskController extends ChangeNotifier {
   Future<void> selectServer(Record selected) async {
     await disconnect();
     server = selected;
+    _importedMethod = null;
     metadata = '{}';
     requestCredentials = MetadataReferences({});
     emit();
+  }
+
+  Future<void> loadImportedRequest(
+    Record profile,
+    Record request,
+    RequestOptions options,
+  ) async {
+    if (invoking || connecting) {
+      throw const FormatException(
+        'Finish or cancel the active operation before importing.',
+      );
+    }
+    await selectServer(profile);
+    if (_disposed) return;
+    loadRequest(request);
+    _importedMethod = request['fullMethod'] as String;
+    timeoutMs = options.timeoutMs;
+    authority = options.authority;
+    status = 'Imported and saved request. Connect explicitly to resolve its method; no RPC was invoked.';
+    emit();
+  }
+
+  void _resolveImportedMethod() {
+    if (_importedMethod == null) return;
+    final found = schema.methods[_importedMethod];
+    if (found == null) return;
+    method = found;
+    _importedMethod = null;
+    if (found.clientStreaming) {
+      warning = 'The imported method uses request streaming. Command sequences are unsupported; use Queue/Send and Finish sending explicitly.';
+    }
   }
 
   Future<void> browseSources() async {
@@ -161,8 +196,6 @@ class DeskController extends ChangeNotifier {
         s['tlsClientCertificateFile'] as String? ?? '',
         s['tlsClientKeyFile'] as String? ?? '',
       );
-      final reflectionJson = (s['reflectionMetadataJson'] as String? ?? '')
-          .trim();
       List<int>? certificates;
       final caFile = s['tlsCaFile'] as String? ?? '';
       if (s['tlsEnabled'] == true && caFile.isNotEmpty) {
@@ -178,27 +211,10 @@ class DeskController extends ChangeNotifier {
         }
       }
       if (generation != _generation) return;
-      final inherited = reflectionJson.isEmpty;
-      final reflectionReferences = MetadataReferences.decode(
-        s['reflectionMetadataReferencesJson'] as String?,
-      );
-      final baseReferences = MetadataReferences.decode(
-        s['metadataReferencesJson'] as String?,
-      );
       final reflectionHeaders = s['reflectionEnabled'] == false
           ? <String, String>{}
-          : await MetadataReferences({
-              if (inherited) ...baseReferences.headers,
-              ...reflectionReferences.headers,
-            }).resolve(
-              parseMetadata(
-                inherited
-                    ? s['metadataJson'] as String? ?? '{}'
-                    : reflectionJson,
-              ),
-              credentials,
-              credentialScope(s),
-            );
+          : await MetadataPlan.reflection(s)
+                .resolve(credentials, credentialScope(s));
       if (generation != _generation || _disposed) return;
       connectionSecrets.addAll(reflectionHeaders.values);
       final discovery = await engine.connect(
@@ -208,6 +224,7 @@ class DeskController extends ChangeNotifier {
           certificates: certificates,
           identity: identity,
           serverName: (s['tlsServerName'] as String? ?? '').trim(),
+          httpAuthority: (s['httpAuthority'] as String? ?? '').trim(),
           reflectionMetadata: reflectionHeaders,
           reflection: s['reflectionEnabled'] != false,
           schemaProvider: compileLocal,
@@ -219,6 +236,7 @@ class DeskController extends ChangeNotifier {
       method = method == null ? null : schema.methods[method!.path];
       _connectedRecipient = credentialScope(s);
       connected = true;
+      _resolveImportedMethod();
       warning = [
         warning,
         redactKnownSecrets(discovery.warning, connectionSecrets),
@@ -249,6 +267,7 @@ class DeskController extends ChangeNotifier {
           }
         }
         if (generation != _generation || _disposed) return;
+        _resolveImportedMethod();
         status =
             'Server transport failed: ${redactKnownSecrets(e.toString(), connectionSecrets)}${schema.services.isEmpty ? '' : ' · local schema remains available'}';
       }
@@ -304,7 +323,8 @@ class DeskController extends ChangeNotifier {
     replaying = false;
     queuedRequests.clear();
     sentRequests = [];
-    body = '{}';
+    if (_importedMethod != selected.path) body = '{}';
+    _importedMethod = null;
     result = null;
     messages.clear();
     responseRevision++;
@@ -442,24 +462,13 @@ class DeskController extends ChangeNotifier {
           'Connection settings changed. Reconnect before invoking; no credential was resolved or sent.',
         );
       }
-      final overrides = parseMetadata(metadata);
-      final references =
-          {
-            ...MetadataReferences.decode(
-              selectedServer['metadataReferencesJson'] as String?,
-            ).headers,
-          }..removeWhere(
-            (key, _) => overrides.keys.any((k) => k.toLowerCase() == key),
-          );
-      references.addAll(requestCredentials.headers);
-      usedReferences = MetadataReferences(references);
-      literalHeaders = {
-        for (final e in parseMetadata(
-          selectedServer['metadataJson'] as String? ?? '{}',
-        ).entries)
-          e.key.toLowerCase(): e.value,
-        for (final e in overrides.entries) e.key.toLowerCase(): e.value,
-      }..removeWhere((key, _) => references.containsKey(key));
+      final plan = MetadataPlan.rpc(
+        selectedServer,
+        metadata,
+        requestCredentials,
+      );
+      usedReferences = plan.references;
+      literalHeaders = plan.literals;
       headers = literalHeaders;
     } catch (e) {
       status = e.toString();
@@ -591,6 +600,10 @@ class DeskController extends ChangeNotifier {
         'requestStreamJson': jsonEncode(outgoing),
         'requestMetadataJson': jsonEncode(literalHeaders),
         'requestCredentialReferencesJson': usedReferences.encode(),
+        'requestOptionsJson': RequestOptions(
+          callTimeoutMs,
+          callAuthority,
+        ).encode(),
         'responseJson': pretty.convert(
           selected.serverStreaming
               ? response.messages
@@ -621,12 +634,14 @@ class DeskController extends ChangeNotifier {
 
   void loadRequest(Record item) {
     late MetadataReferences references;
+    RequestOptions? options;
     try {
+      options = RequestOptions.decode(item['requestOptionsJson'] as String?);
       references = MetadataReferences.decode(
         item['requestCredentialReferencesJson'] as String?,
       );
     } catch (_) {
-      status = 'Request has invalid protected references. Repair or remove them in the saved request editor.';
+      status = 'Request has invalid protected references or call options. Repair the saved request configuration.';
       emit();
       return;
     }
@@ -643,6 +658,10 @@ class DeskController extends ChangeNotifier {
     body = item['requestJson'] as String? ?? '{}';
     metadata = item['requestMetadataJson'] as String? ?? '{}';
     requestCredentials = references;
+    if (options != null) {
+      timeoutMs = options.timeoutMs;
+      authority = options.authority;
+    }
     result = null;
     messages.clear();
     responseRevision++;
@@ -666,6 +685,7 @@ class DeskController extends ChangeNotifier {
     ),
     'requestMetadataJson': metadata,
     'requestCredentialReferencesJson': requestCredentials.encode(),
+    'requestOptionsJson': RequestOptions(timeoutMs, authority).encode(),
   };
   String get responseJson => pretty.convert(
     method?.serverStreaming == true
@@ -682,6 +702,7 @@ class DeskController extends ChangeNotifier {
     tls: server['tlsEnabled'] == true,
     serverName: server['tlsServerName'] as String? ?? '',
     caFileReference: server['tlsCaFile'] as String? ?? '',
+    httpAuthority: server['httpAuthority'] as String? ?? '',
     authority: authority,
   );
   static Map<String, String> parseMetadata(String text) =>
