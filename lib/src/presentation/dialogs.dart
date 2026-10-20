@@ -13,6 +13,7 @@ import '../security/credentials.dart';
 import '../request_options.dart';
 import 'design.dart';
 import 'proto_sources.dart';
+import 'history.dart';
 import '../sources/configuration.dart';
 import '../sources/manager.dart';
 
@@ -869,84 +870,8 @@ Future<void> showCollections(BuildContext context, DeskController desk) async {
   );
 }
 
-Future<void> showHistory(BuildContext context, DeskController desk) async {
-  await showDialog<void>(
-    context: context,
-    builder: (context) => AnimatedBuilder(
-      animation: desk,
-      builder: (context, _) => AlertDialog(
-        title: const Text('Invocation history'),
-        content: SizedBox(
-          width: 850,
-          height: 500,
-          child: ListView(
-            children: [
-              if (desk.history.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text(
-                    'Completed calls appear here. History stays on this computer.',
-                  ),
-                ),
-              for (final item in desk.history)
-                ListTile(
-                  title: Text(
-                    '${item['methodName']} · ${item['statusCode']} · ${item['durationMs']} ms',
-                  ),
-                  subtitle: Text(
-                    '${item['serverAddress']} · ${item['createdAt']}',
-                  ),
-                  onTap: () => previewRequest(context, desk, item, true),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Reuse request',
-                        onPressed: () {
-                          desk.loadRequest(item);
-                          Navigator.pop(context);
-                        },
-                        icon: const Icon(Icons.replay),
-                      ),
-                      IconButton(
-                        tooltip: 'Save to collection',
-                        onPressed: () => saveExample(context, desk, item),
-                        icon: const Icon(Icons.bookmark_add_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'Delete history item',
-                        onPressed: () {
-                          desk.store.delete(
-                            'history_items',
-                            item['id'] as String,
-                          );
-                          desk.refresh();
-                        },
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              desk.store.clearHistory();
-              desk.refresh();
-            },
-            child: const Text('Clear history'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    ),
-  );
-}
+Future<void> showHistory(BuildContext context, DeskController desk) =>
+    showHistoryBrowser(context, desk);
 
 Future<void> previewRequest(
   BuildContext context,

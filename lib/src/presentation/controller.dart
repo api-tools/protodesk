@@ -1,23 +1,25 @@
-import '../transport/diagnostics.dart';
-
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
-import '../transport/engine.dart';
-import '../transport/tls_identity.dart';
-import '../schema/schema.dart';
-import '../schema/codec.dart';
-import '../sources/manager.dart';
-import '../sources/configuration.dart';
 import '../persistence/store.dart';
-import '../security/credentials.dart';
+import '../request_options.dart';
+import '../schema/codec.dart';
+import '../schema/schema.dart';
 import '../security/catalog.dart';
+import '../security/credentials.dart';
+import '../security/metadata.dart';
 import '../security/native_vault.dart';
 import '../security/redaction.dart';
-import '../security/metadata.dart';
-import '../request_options.dart';
+import '../sources/configuration.dart';
+import '../sources/manager.dart';
+import '../transport/diagnostics.dart';
+import '../transport/engine.dart';
+import '../transport/tls_identity.dart';
+import '../workflow/storage.dart';
 
 const pretty = JsonEncoder.withIndent('  ');
 
@@ -66,13 +68,95 @@ class DeskController extends ChangeNotifier {
     refresh();
   }
   void emit() {
-    if (!_disposed) notifyListeners();
+    if (!_disposed) {
+      scheduleDraft();
+      notifyListeners();
+    }
+  }
+
+  Timer? _draftTimer;
+  SchemaRegistry? _signatureSchema;
+  String _signature = '';
+  bool _draftBlocked = false;
+  String schemaSignature() {
+    if (!identical(_signatureSchema, schema)) {
+      _signatureSchema = schema;
+      final files = schema.files.keys.toList()..sort();
+      _signature = sha256.convert([
+        for (final file in files) ...[
+          ...utf8.encode(file),
+          0,
+          ...schema.files[file]!,
+        ],
+      ]).toString();
+    }
+    return _signature;
+  }
+
+  void scheduleDraft() {
+    _draftTimer?.cancel();
+    if (server == null || method == null || _draftBlocked) return;
+    _draftTimer = Timer(const Duration(milliseconds: 350), persistDraft);
+  }
+
+  void persistDraft() {
+    _draftTimer?.cancel();
+    if (server == null || method == null || _draftBlocked) return;
+    try {
+      DraftStore(store).save(
+        server!['id'] as String,
+        method!.path,
+        RequestDraft(
+          body: body,
+          metadata: metadata,
+          references: requestCredentials.encode(),
+          authority: authority,
+          timeoutMs: timeoutMs,
+          signature: schemaSignature(),
+          queue: List.of(queuedRequests),
+          lastSent: List.of(sentRequests),
+        ),
+      );
+    } catch (_) {
+      const message =
+          'Draft could not be saved. Original stored data remains intact.';
+      if (warning != message) {
+        warning = message;
+        if (!_disposed) notifyListeners();
+      }
+    }
+  }
+
+  void restoreDraft() {
+    _draftBlocked = false;
+    if (server == null || method == null) return;
+    try {
+      final draft = DraftStore(store)
+          .load(server!['id'] as String, method!.path);
+      if (draft == null) return;
+      final references = MetadataReferences.decode(draft.references);
+      body = draft.body;
+      metadata = draft.metadata;
+      requestCredentials = references;
+      timeoutMs = draft.timeoutMs;
+      authority = draft.authority;
+      queuedRequests
+        ..clear()
+        ..addAll(draft.queue);
+      sentRequests = List.of(draft.lastSent);
+      if (draft.signature != schemaSignature()) {
+        warning = 'Schema changed since this draft was saved. Original JSON and sequences were restored; review validation before invoking.';
+      }
+    } catch (_) {
+      _draftBlocked = true;
+      warning = 'Saved draft has an unsupported or invalid configuration. It remains intact; current editing will not overwrite it.';
+    }
   }
 
   void refresh() {
     servers = store.list('servers');
     collections = store.list('collections');
-    history = store.list('history_items').take(100).toList();
+    history = queryHistory(store, limit: 100).rows;
     server ??= servers.firstOrNull;
     emit();
   }
@@ -294,6 +378,7 @@ class DeskController extends ChangeNotifier {
   }
 
   Future<void> disconnect() async {
+    persistDraft();
     sourceOperation?.cancel();
     ++_generation;
     await engine.disconnect();
@@ -318,6 +403,7 @@ class DeskController extends ChangeNotifier {
   }
 
   void selectMethod(ProtoMethod selected) {
+    persistDraft();
     // Offline methods remain selectable while discovery is in progress.
     if (!connecting) ++_generation;
     engine.cancel();
@@ -327,7 +413,12 @@ class DeskController extends ChangeNotifier {
     replaying = false;
     queuedRequests.clear();
     sentRequests = [];
-    if (_importedMethod != selected.path) body = '{}';
+    final imported = _importedMethod == selected.path;
+    if (!imported) {
+      body = '{}';
+      warning = '';
+      restoreDraft();
+    }
     _importedMethod = null;
     result = null;
     diagnostics = null;
@@ -381,6 +472,27 @@ class DeskController extends ChangeNotifier {
     } catch (e) {
       return e.toString();
     }
+  }
+
+  void loadLastSent() {
+    if (invoking || method == null || sentRequests.isEmpty) return;
+    final last = pretty.convert(sentRequests.last);
+    final invalid = method!.clientStreaming
+        ? validateQueue(sentRequests, replay: true)
+        : validateBody(last);
+    if (invalid != null) {
+      status = 'Last sent data is incompatible with the current schema. Existing draft remains intact.';
+      emit();
+      return;
+    }
+    body = last;
+    if (method!.clientStreaming) {
+      queuedRequests
+        ..clear()
+        ..addAll(jsonDecode(jsonEncode(sentRequests)) as List);
+    }
+    status = 'Last sent data loaded into the draft; no RPC was invoked.';
+    emit();
   }
 
   void queueDraft() {
@@ -602,6 +714,10 @@ class DeskController extends ChangeNotifier {
     callClock.stop();
     replaying = false;
     result = response;
+    if (!selected.clientStreaming &&
+        (response.diagnostics?.sentMessages ?? 0) > 0) {
+      sentRequests = [jsonDecode(request)];
+    }
     diagnostics = response.diagnostics ?? diagnostics;
     invoking = false;
     status =
@@ -651,6 +767,7 @@ class DeskController extends ChangeNotifier {
   }
 
   void loadRequest(Record item) {
+    persistDraft();
     late MetadataReferences references;
     RequestOptions? options;
     try {
@@ -663,6 +780,7 @@ class DeskController extends ChangeNotifier {
       emit();
       return;
     }
+    _draftBlocked = false;
     ++_generation;
     engine.cancel();
     invoking = false;
@@ -730,6 +848,8 @@ class DeskController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    persistDraft();
+    _draftTimer?.cancel();
     credentials.dispose();
     sourceOperation?.cancel();
     callClock.stop();

@@ -39,6 +39,17 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
     return false;
   }
 
+  void changeMode(bool value) {
+    if (!jsonMode && value && !validForm()) return;
+    if (!value && desk.validateBody(desk.body) != null) {
+      desk.status = 'Fix the JSON request before switching to Form';
+      desk.emit();
+      return;
+    }
+    setState(() => jsonMode = value);
+  }
+
+  final serviceSearchFocus = FocusNode();
   final responseTree = GlobalKey<ResponseTreeState>();
   final collapsed = <String>{};
   DeskController get desk => widget.desk;
@@ -60,6 +71,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
 
   @override
   void dispose() {
+    serviceSearchFocus.dispose();
     desk.removeListener(sync);
     for (final c in [request, timeout, authority, search, responseSearch]) {
       c.dispose();
@@ -118,7 +130,37 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
     ),
   );
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => Focus(
+    autofocus: true,
+    skipTraversal: true,
+    includeSemantics: false,
+    onKeyEvent: (_, event) {
+      final keys = HardwareKeyboard.instance;
+      if (event is! KeyDownEvent ||
+          ModalRoute.of(context)?.isCurrent != true ||
+          keys.isShiftPressed ||
+          keys.isControlPressed == keys.isMetaPressed) {
+        return KeyEventResult.ignored;
+      }
+      if (keys.isAltPressed && event.logicalKey == LogicalKeyboardKey.keyF) {
+        serviceSearchFocus.requestFocus();
+      } else if (keys.isAltPressed &&
+          event.logicalKey == LogicalKeyboardKey.keyJ) {
+        changeMode(!jsonMode);
+      } else if (!keys.isAltPressed &&
+          event.logicalKey == LogicalKeyboardKey.enter) {
+        if (validForm()) desk.invoke();
+      } else if (!keys.isAltPressed &&
+          event.logicalKey == LogicalKeyboardKey.period) {
+        if (desk.invoking) desk.cancel();
+      } else {
+        return KeyEventResult.ignored;
+      }
+      return KeyEventResult.handled;
+    },
+    child: workspaceScaffold(),
+  );
+  Widget workspaceScaffold() => Scaffold(
     body: SafeArea(
       child: Column(
         children: [
@@ -350,6 +392,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
           padding: const EdgeInsets.all(DeskSpace.inset),
           child: TextField(
             controller: search,
+            focusNode: serviceSearchFocus,
             decoration: const InputDecoration(
               hintText: 'Filter services or methods',
               prefixIcon: Icon(Icons.search, size: 18),
@@ -403,7 +446,9 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                             _navigationRow(
                               m.name,
                               selected: desk.method?.path == m.path,
-                              action: () => desk.selectMethod(m),
+                              action: () {
+                                if (validForm()) desk.selectMethod(m);
+                              },
                             ),
                       ],
                   ],
@@ -545,6 +590,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                             text: desk.metadata,
                             onChanged: (v) {
                               desk.metadata = v;
+                              desk.scheduleDraft();
                             },
                           ),
                           const SizedBox(height: DeskSpace.inset),
@@ -567,6 +613,17 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                               desk.emit();
                             },
                           ),
+                          if (desk.sentRequests.isNotEmpty)
+                            TextButton(
+                              onPressed: desk.invoking
+                                  ? null
+                                  : desk.loadLastSent,
+                              child: Text(
+                                desk.method?.clientStreaming == true
+                                    ? 'Load last sent sequence'
+                                    : 'Load last sent request',
+                              ),
+                            ),
                           const SizedBox(height: DeskSpace.inset),
                           TextField(
                             controller: timeout,
@@ -574,8 +631,10 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                             decoration: const InputDecoration(
                               labelText: 'Timeout (ms)',
                             ),
-                            onChanged: (v) =>
-                                desk.timeoutMs = int.tryParse(v) ?? 5000,
+                            onChanged: (v) {
+                              desk.timeoutMs = int.tryParse(v) ?? 5000;
+                              desk.scheduleDraft();
+                            },
                           ),
                           const SizedBox(height: DeskSpace.inset),
                           TextField(
@@ -583,7 +642,10 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                             decoration: const InputDecoration(
                               labelText: 'Authority override (optional)',
                             ),
-                            onChanged: (v) => desk.authority = v,
+                            onChanged: (v) {
+                              desk.authority = v;
+                              desk.scheduleDraft();
+                            },
                           ),
                           const SizedBox(height: DeskSpace.inset),
                         ],
@@ -603,19 +665,7 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
             ),
             child: Align(
               alignment: Alignment.centerRight,
-              child: DeskModeSwitch(
-                json: jsonMode,
-                onChanged: (value) {
-                  if (!jsonMode && value && !validForm()) return;
-                  if (!value && desk.validateBody(desk.body) != null) {
-                    desk.status =
-                        'Fix the JSON request before switching to Form';
-                    desk.emit();
-                    return;
-                  }
-                  setState(() => jsonMode = value);
-                },
-              ),
+              child: DeskModeSwitch(json: jsonMode, onChanged: changeMode),
             ),
           ),
       ],

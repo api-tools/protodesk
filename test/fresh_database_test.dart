@@ -17,6 +17,7 @@ void expectEmpty(DeskController desk) {
   for (final table in WorkspaceStore.columns.keys) {
     expect(desk.store.list(table), isEmpty, reason: table);
   }
+  expect(desk.store.db.select('SELECT * FROM request_drafts'), isEmpty);
   expect(desk.server, isNull);
   expect(desk.connected, isFalse);
   expect(desk.connecting, isFalse);
