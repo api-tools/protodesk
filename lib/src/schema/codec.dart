@@ -41,9 +41,7 @@ class ProtoCodec {
         throw FormatException('Duplicate field ${f.name}');
       }
       final value = entry.value;
-      if (value == null &&
-          f.typeName != 'google.protobuf.Value' &&
-          f.typeName != 'google.protobuf.NullValue') {
+      if (_isUnset(f, value)) {
         continue;
       }
       if (f.oneof != null && !oneofs.add(f.oneof!)) {
@@ -56,6 +54,7 @@ class ProtoCodec {
           throw FormatException('${f.name} requires an array');
         }
         for (final v in value) {
+          _validateElement(f, v);
           _write(w, f, v, depth);
         }
       } else {
@@ -71,7 +70,7 @@ class ProtoCodec {
     }
     for (final field in m.fields.where((f) => f.label == 2)) {
       if (!used.contains(field.number) ||
-          (json[field.jsonName] ?? json[field.name]) == null) {
+          _isUnset(field, json[field.jsonName] ?? json[field.name])) {
         throw FormatException('Required field ${field.name} is missing');
       }
     }
@@ -89,7 +88,28 @@ class ProtoCodec {
     return v == 0 || v == '0';
   }
 
+  // A collection set to null is absent, even when its element type is Value.
+  bool _isUnset(ProtoField field, Object? value) =>
+      value == null &&
+      (field.repeated ||
+          (field.typeName != 'google.protobuf.Value' &&
+              field.typeName != 'google.protobuf.NullValue'));
+
+  void _validateElement(ProtoField field, Object? value) {
+    if (value == null &&
+        field.typeName != 'google.protobuf.Value' &&
+        field.typeName != 'google.protobuf.NullValue') {
+      throw FormatException('${field.name} cannot contain null elements');
+    }
+  }
+
   void validateField(ProtoField field, Object? value) {
+    if (_isUnset(field, value)) {
+      if (field.label == 2) {
+        throw FormatException('Required field ${field.name} is missing');
+      }
+      return;
+    }
     final writer = WireWriter();
     if (isMap(field)) {
       _writeMap(writer, field, value, 0);
@@ -98,6 +118,7 @@ class ProtoCodec {
         throw const FormatException('Repeated field requires an array');
       }
       for (final item in value) {
+        _validateElement(field, item);
         _write(writer, field, item, 0);
       }
     } else {
@@ -114,6 +135,7 @@ class ProtoCodec {
     }
     final map = message(f.typeName);
     for (final e in value.entries) {
+      _validateElement(map.fields[1], e.value);
       Object key = e.key;
       final k = map.fields.first;
       if (k.type == 8) {

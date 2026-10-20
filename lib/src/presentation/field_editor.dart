@@ -214,7 +214,8 @@ class _FieldEditorState extends State<FieldEditor>
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
                 'Form',
@@ -230,9 +231,13 @@ class _FieldEditorState extends State<FieldEditor>
                 },
                 child: const Text('JSON'),
               ),
-              const Spacer(),
+              IconButton(
+                tooltip: 'Set empty message',
+                onPressed: () => update(<String, Object?>{}),
+                icon: const Icon(Icons.add_box_outlined, size: 18),
+              ),
               TextButton(
-                onPressed: () => update(null),
+                onPressed: () => update(unsetFieldValue),
                 child: const Text('Unset'),
               ),
             ],
@@ -271,7 +276,9 @@ class _FieldEditorState extends State<FieldEditor>
                             value.remove(f.name);
                             if (identical(v, unsetFieldValue) ||
                                 (v == null &&
-                                    f.typeName != 'google.protobuf.Value')) {
+                                    f.typeName != 'google.protobuf.Value' &&
+                                    f.typeName !=
+                                        'google.protobuf.NullValue')) {
                               value.remove(f.jsonName);
                             } else {
                               if (f.oneof != null) {
@@ -305,6 +312,21 @@ class _FieldEditorState extends State<FieldEditor>
             onChanged: update,
           ),
           Text(widget.value == null ? 'Unset' : widget.value.toString()),
+        ],
+      );
+    }
+    if (field.typeName == 'google.protobuf.NullValue') {
+      return Row(
+        children: [
+          const Text('null'),
+          TextButton(
+            onPressed: () => update(null),
+            child: const Text('Set null'),
+          ),
+          TextButton(
+            onPressed: () => update(unsetFieldValue),
+            child: const Text('Unset'),
+          ),
         ],
       );
     }
@@ -396,14 +418,22 @@ class _FieldEditorState extends State<FieldEditor>
                       }
                     },
                   )
-                : null,
+                : IconButton(
+                    tooltip: 'Unset field',
+                    onPressed: () {
+                      text.clear();
+                      setState(() => error = null);
+                      update(unsetFieldValue);
+                    },
+                    icon: const Icon(Icons.clear, size: 16),
+                  ),
           ),
           onChanged: (raw) {
             try {
               Object? value;
               if (raw.isEmpty) {
                 value =
-                    (scalarWrapper && {9, 12}.contains(scalarType)) ||
+                    {9, 12}.contains(scalarType) ||
                         field.typeName == 'google.protobuf.FieldMask'
                     ? ''
                     : null;

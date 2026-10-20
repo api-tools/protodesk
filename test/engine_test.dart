@@ -165,6 +165,20 @@ void main() {
         expect(response.messages.single, {'text': 'dynamic'});
         expect(response.headers['echo-header'], 'verified');
         expect(response.trailers['echo-trailer'], 'complete');
+        for (final body in <Map<String, Object?>>[
+          {},
+          {'text': null, 'nested': null, 'values': null, 'wrapped': null},
+          {'nested': {}, 'present': false, 'wrapped': '0', 'first': ''},
+        ]) {
+          final emptyOrPresent = await engine.invoke(method, body);
+          expect(emptyOrPresent.code, 'OK');
+          expect(emptyOrPresent.messages, [
+            body.containsKey('present')
+                ? {'nested': {}, 'present': false, 'wrapped': '0', 'first': ''}
+                : <String, Object?>{},
+          ]);
+        }
+
         expect(
           (await engine.invoke(method, {'text': 'error'})).code,
           'PERMISSION_DENIED',

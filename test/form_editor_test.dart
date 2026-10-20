@@ -34,6 +34,7 @@ void main() {
     void Function(Object?) observe,
   ) async {
     var value = initial;
+    var present = true;
     await tester.pumpWidget(
       MaterialApp(
         theme: deskTheme,
@@ -44,9 +45,13 @@ void main() {
                 field: f,
                 schema: schema,
                 value: value,
+                present: present,
                 onChanged: (v) {
                   observe(v);
-                  setState(() => value = v);
+                  setState(() {
+                    present = !identical(v, unsetFieldValue);
+                    value = present ? v : null;
+                  });
                 },
               ),
             ),
@@ -56,6 +61,69 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('empty strings can be present and explicitly unset', (
+    tester,
+  ) async {
+    Object? changed;
+    await mount(
+      tester,
+      const ProtoField(
+        name: 'text',
+        jsonName: 'text',
+        number: 1,
+        type: 9,
+        optional: true,
+      ),
+      'filled',
+      (v) => changed = v,
+    );
+    await tester.enterText(find.byType(TextField), '');
+    expect(changed, '');
+    await tester.tap(find.byTooltip('Unset field'));
+    expect(identical(changed, unsetFieldValue), true);
+  });
+
+  testWidgets('an untouched child can be explicitly present but empty', (
+    tester,
+  ) async {
+    Object? changed;
+    final f = schema.messages['editor.fixture.Editors']!.fields.firstWhere(
+      (f) => f.name == 'child',
+    );
+    await mount(tester, f, null, (v) => changed = v);
+    await tester.tap(find.byTooltip('Set empty message').first);
+    expect(changed, <String, Object?>{});
+    expect(
+      ProtoCodec(schema).encode('editor.fixture.Editors', {'child': changed}),
+      [10, 0],
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unset').first);
+    expect(identical(changed, unsetFieldValue), true);
+  });
+
+  testWidgets('NullValue has separate set-null and unset actions', (
+    tester,
+  ) async {
+    Object? changed = 'unchanged';
+    await mount(
+      tester,
+      const ProtoField(
+        name: 'nil',
+        jsonName: 'nil',
+        number: 1,
+        type: 14,
+        typeName: 'google.protobuf.NullValue',
+      ),
+      null,
+      (v) => changed = v,
+    );
+    await tester.tap(find.text('Set null'));
+    expect(changed, isNull);
+    await tester.tap(find.text('Unset'));
+    expect(identical(changed, unsetFieldValue), true);
+  });
 
   testWidgets('string well-known fields show editable unquoted values', (
     tester,

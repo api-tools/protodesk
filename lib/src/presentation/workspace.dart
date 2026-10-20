@@ -782,7 +782,9 @@ class _DeskWorkspaceState extends State<DeskWorkspace> {
                 onChanged: (v) {
                   body.remove(f.name);
                   if (identical(v, unsetFieldValue) ||
-                      (v == null && f.typeName != 'google.protobuf.Value')) {
+                      (v == null &&
+                          f.typeName != 'google.protobuf.Value' &&
+                          f.typeName != 'google.protobuf.NullValue')) {
                     body.remove(f.jsonName);
                   } else {
                     if (f.oneof != null) {
