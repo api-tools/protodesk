@@ -476,6 +476,14 @@ class WorkspaceStore {
   void delete(String table, String id) {
     _check(table);
     transaction(() {
+      if (table == 'servers') {
+        for (final auxiliary in ['request_drafts', 'request_templates']) {
+          db.execute(
+            'DELETE FROM $auxiliary WHERE workspace_id=? AND server_id=?',
+            ['local', id],
+          );
+        }
+      }
       if (table == 'collections') {
         db.execute(
           'DELETE FROM collection_requests WHERE workspace_id=? AND collection_id=?',

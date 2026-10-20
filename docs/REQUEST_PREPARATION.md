@@ -48,7 +48,7 @@ After a prior apply, current request overrides can intentionally win over newly 
 
 ## Persistence, transfer and limits
 
-Migration adds `servers.request_profiles_json` and a separate `request_templates` table, with version-1 representations. Existing backups run before schema changes; server IDs, collections, requests, history and credential catalogs are preserved. Fresh installations contain no definitions/templates or seeded user records. Version-1/2 workspaces remain accepted.
+Migration adds `servers.request_profiles_json` and a separate `request_templates` table, with version-1 representations. Existing backups run before schema changes; server IDs, collections, requests, history and credential catalogs are preserved. Deleting a server transactionally removes its local working drafts and reusable templates, including unsupported states; other servers/workspaces and independently saved collections/history remain intact. Fresh installations contain no definitions/templates or seeded user records. Version-1/2 workspaces remain accepted.
 
 Safe exports omit literal environment/header values. Variables become explicitly **unbound**, distinct from a bound variable whose value is null; preset headers become unbound references. Full literal inclusion is an explicit export choice and never reads OS values. Unknown/corrupted definitions remain intact on startup and unrelated server/cache edits; safe export/preparation rejects them rather than guessing how to discard sensitive fields. Explicit full workspace export preserves the raw definition for recovery. Unsupported imports fail transactionally. Unknown local templates are preserved and cannot be silently replaced; current-draft preparation remains available without template replacement.
 

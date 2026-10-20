@@ -109,6 +109,39 @@ void main() {
       isNull,
     );
   });
+  test('deleting a server removes only its local drafts and templates transactionally', () {
+    final ids = <String, String>{};
+    for (final name in ['deleted', 'retained']) {
+      final server = store.save('servers', {
+        'name': name,
+        'address': 'localhost:50051',
+      });
+      final id = ids[name] = server['id'] as String;
+      for (final table in ['request_drafts', 'request_templates']) {
+        for (final workspace in ['local', 'another-workspace']) {
+          store.db.execute('INSERT INTO $table VALUES(?,?,?,?,?)', [
+            workspace,
+            id,
+            '/fixture.Service/Call',
+            '{"version":900,"literal":"retained-until-deletion"}',
+            '2026-10-21',
+          ]);
+        }
+      }
+    }
+    store.delete('servers', ids['deleted']!);
+    expect(store.list('servers').single['id'], ids['retained']);
+    for (final table in ['request_drafts', 'request_templates']) {
+      expect(
+        store.db.select(
+          'SELECT * FROM $table WHERE workspace_id=? AND server_id=?',
+          ['local', ids['deleted']],
+        ),
+        isEmpty,
+      );
+      expect(store.db.select('SELECT * FROM $table').length, 3);
+    }
+  });
   test('future reusable template is preserved rather than replaced', () {
     const raw = '{"version":900,"future":"preserve-original"}';
     store.db.execute('INSERT INTO request_templates VALUES(?,?,?,?,?)', [
