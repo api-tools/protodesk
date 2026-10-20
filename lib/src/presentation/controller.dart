@@ -1,3 +1,5 @@
+import '../transport/diagnostics.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -42,6 +44,7 @@ class DeskController extends ChangeNotifier {
   final callClock = Stopwatch();
   bool connected = false, connecting = false, invoking = false;
   CallResult? result;
+  CallDiagnostics? diagnostics;
   final messages = <Object?>[];
   final queuedRequests = <Object?>[];
   List<Object?> sentRequests = [];
@@ -305,6 +308,7 @@ class DeskController extends ChangeNotifier {
     queuedRequests.clear();
     sentRequests = [];
     result = null;
+    diagnostics = null;
     messages.clear();
     responseRevision++;
     callClock.stop();
@@ -326,6 +330,7 @@ class DeskController extends ChangeNotifier {
     if (_importedMethod != selected.path) body = '{}';
     _importedMethod = null;
     result = null;
+    diagnostics = null;
     messages.clear();
     responseRevision++;
     callClock.stop();
@@ -477,6 +482,7 @@ class DeskController extends ChangeNotifier {
     }
     invoking = true;
     result = null;
+    diagnostics = null;
     messages.clear();
     responseRevision++;
     callClock.stop();
@@ -508,6 +514,13 @@ class DeskController extends ChangeNotifier {
       }
     }
 
+    void onDiagnostics(CallDiagnostics value) {
+      if (generation == _generation && !_disposed) {
+        diagnostics = value;
+        emit();
+      }
+    }
+
     CallResult response;
     try {
       _resolvingCredentialGeneration = generation;
@@ -531,6 +544,7 @@ class DeskController extends ChangeNotifier {
           authority: callAuthority,
           onMessage: onMessage,
           onHeaders: onHeaders,
+          onDiagnostics: onDiagnostics,
         );
         final call = requestStream!;
         final sequence = List<Object?>.of(queuedRequests);
@@ -556,11 +570,13 @@ class DeskController extends ChangeNotifier {
           authority: callAuthority,
           onMessage: onMessage,
           onHeaders: onHeaders,
+          onDiagnostics: onDiagnostics,
         );
       }
     } catch (e) {
       if (generation != _generation || _disposed) return;
       await engine.cancel();
+      diagnostics?.complete('FAILED_PRECONDITION');
       response = CallResult(
         List.of(messages),
         'FAILED_PRECONDITION',
@@ -580,11 +596,13 @@ class DeskController extends ChangeNotifier {
         response.durationMs,
         response.headers,
         response.trailers,
+        diagnostics: response.diagnostics,
       );
     }
     callClock.stop();
     replaying = false;
     result = response;
+    diagnostics = response.diagnostics ?? diagnostics;
     invoking = false;
     status =
         '${response.code} · ${response.durationMs} ms${response.error.isEmpty ? '' : ' · ${response.error}'}';
@@ -663,6 +681,7 @@ class DeskController extends ChangeNotifier {
       authority = options.authority;
     }
     result = null;
+    diagnostics = null;
     messages.clear();
     responseRevision++;
     callClock.stop();

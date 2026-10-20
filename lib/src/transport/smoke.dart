@@ -105,6 +105,17 @@ Future<void> releaseSmoke(
         chatted.trailers['echo-trailer'] != 'chat-complete') {
       throw StateError('Release bidirectional streaming failed');
     }
+    for (final response in [result, stream, uploaded, chatted]) {
+      final trace = response.diagnostics;
+      if (trace == null ||
+          trace.code != 'OK' ||
+          trace.sentMessages < 1 ||
+          trace.receivedMessages != response.messages.length ||
+          trace.firstResponseUs == null ||
+          trace.events.last.kind != 'completed') {
+        throw StateError('Compiled diagnostics check failed');
+      }
+    }
     final database = '${databaseRoot.path}/release-check.sqlite';
     var store = WorkspaceStore.open(database);
     final saved = store.save('servers', {
@@ -174,6 +185,7 @@ Future<void> releaseSmoke(
         'bidirectionalStream': chatted.code,
         'receivedBeforeHalfClose': true,
         'persistence': 'PASS',
+        'diagnostics': 'PASS',
         'nativeDataPath': nativeDataPath == null ? 'not applicable' : 'PASS',
       }),
     );
