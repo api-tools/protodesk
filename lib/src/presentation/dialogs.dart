@@ -739,7 +739,7 @@ Future<void> previewRequest(
 
 Future<void> showWorkspace(BuildContext context, DeskController desk) async {
   String message =
-      'Version 1 · Servers, proto references, collections, and examples. History is excluded. Imports create new records.';
+      'Version 2 export · Version 1/2 import · Servers, proto references, collections, and examples. History is excluded. Imports create new records.';
   await showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(

@@ -12,7 +12,7 @@ The separate Example Server, local user databases, profiles, logs and credential
 
 Validation: formatter/analyzer, 64 Flutter tests, 12 distribution-script tests, desktop release builds, compiled reflection/proto smoke for all four RPC modes, and fresh packaged startup. The macOS package was also inspected interactively with isolated storage.
 
-macOS is **ad-hoc signed and not notarized**; Windows is unsigned. Developer ID signing and notarization remain deferred. No Flutter, Dart or protoc installation is needed to run the bundle.
+macOS is **ad-hoc signed and not notarized**; Windows is unsigned. Signed/notarized production releases use a separate verified distribution path; this development archive does not. No Flutter, Dart or protoc installation is needed to run the bundle.
 
 ## Run the downloaded bundle
 
