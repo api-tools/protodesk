@@ -15,6 +15,8 @@ import '../schema/codec.dart';
 import '../schema/wire.dart';
 import '../schema/proto_loader.dart';
 
+const _connectionTimeout = Duration(seconds: 30);
+
 class ConnectionConfig {
   final String address;
   final bool tls, reflection;
@@ -63,7 +65,7 @@ class ConnectionConfig {
     final socket = await Socket.connect(
       host,
       port,
-      timeout: const Duration(seconds: 5),
+      timeout: _connectionTimeout,
     );
     if (context == null) return socket;
     try {
@@ -74,7 +76,7 @@ class ConnectionConfig {
         host: serverName.isNotEmpty ? serverName : authority ?? host,
         context: context,
         supportedProtocols: ['h2'],
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(_connectionTimeout);
     } catch (_) {
       socket.destroy();
       rethrow;
@@ -96,21 +98,71 @@ class _Connector implements ClientTransportConnector {
   final ConnectionConfig config;
   final String? overrideAuthority;
   Socket? socket;
+  http2.ClientTransportConnection? _prepared;
+  int _generation = 0;
   _Connector(this.config, this.overrideAuthority);
   @override
   String get authority => overrideAuthority ?? config.defaultAuthority;
-  @override
-  Future<http2.ClientTransportConnection> connect() async {
+
+  // Establish the transport once and hand that same connection to gRPC.
+  Future<void> prepare() async {
+    _prepared = await _open();
+  }
+
+  Future<http2.ClientTransportConnection> _open() async {
+    final generation = _generation;
     final connected = await config.openSocket(overrideAuthority);
+    if (generation != _generation) {
+      connected.destroy();
+      throw const GrpcError.cancelled('Connection superseded');
+    }
     socket = connected;
     connected.setOption(SocketOption.tcpNoDelay, true);
-    return http2.ClientTransportConnection.viaSocket(connected);
+    final transport = http2.ClientTransportConnection.viaSocket(connected);
+    try {
+      // Like a blocking gRPC dial, wait for HTTP/2 readiness on the connection
+      // that will carry discovery and RPCs, rather than a disposable probe.
+      await Future.any<void>([
+        transport.onInitialPeerSettingsReceived,
+        connected.done.then<void>((_) {
+          if (generation != _generation) {
+            throw const GrpcError.cancelled('Connection superseded');
+          }
+          throw const GrpcError.unavailable(
+            'Server closed the connection before sending HTTP/2 settings',
+          );
+        }),
+      ]).timeout(
+        _connectionTimeout,
+        onTimeout: () => throw const GrpcError.unavailable(
+          'Timed out waiting for server HTTP/2 settings after 30 seconds',
+        ),
+      );
+      if (generation != _generation) {
+        throw const GrpcError.cancelled('Connection superseded');
+      }
+      return transport;
+    } catch (_) {
+      connected.destroy();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<http2.ClientTransportConnection> connect() async {
+    final prepared = _prepared;
+    _prepared = null;
+    return prepared ?? await _open();
   }
 
   @override
   Future get done => socket?.done ?? Future.value();
   @override
-  void shutdown() => socket?.destroy();
+  void shutdown() {
+    _generation++;
+    _prepared = null;
+    socket?.destroy();
+  }
 }
 
 class DiscoveryResult {
@@ -264,6 +316,7 @@ class GrpcEngine {
   final ProtoLoader loader;
   ClientTransportConnectorChannel? _channel;
   ConnectionConfig? _config;
+  _Connector? _connector;
   SchemaRegistry schema = SchemaRegistry();
   final _calls = <ResponseStream<List<int>>>{};
   final _diagnostics = <ResponseStream<List<int>>, CallDiagnostics>{};
@@ -281,20 +334,24 @@ class GrpcEngine {
     }
     _calls.clear();
     final channel = _channel;
+    final connector = _connector;
+    _connector = null;
     _channel = null;
     _config = null;
     schema = SchemaRegistry();
     await channel?.shutdown();
+    connector?.shutdown();
   }
 
   ClientTransportConnectorChannel _create(
     ConnectionConfig config, [
     String? authority,
+    _Connector? connector,
   ]) {
     return ClientTransportConnectorChannel(
-      _Connector(config, authority),
+      connector ?? _Connector(config, authority),
       options: ChannelOptions(
-        connectTimeout: const Duration(seconds: 5),
+        connectTimeout: _connectionTimeout,
         credentials: config.tls
             ? const ChannelCredentials.secure()
             : const ChannelCredentials.insecure(),
@@ -305,23 +362,19 @@ class GrpcEngine {
   Future<DiscoveryResult> connect(ConnectionConfig config) async {
     await disconnect();
     final generation = _generation;
-    // The probe and every gRPC channel use the same trust and client identity.
-    final socket = await config.openSocket();
-    // TLS 1.3 can return the client socket before the peer rejects its client
-    // identity. Receiving HTTP/2 SETTINGS proves the peer accepted the session,
-    // without invoking a health method, application RPC or keepalive PING.
-    final probe = http2.ClientTransportConnection.viaSocket(socket);
+    final connector = _Connector(config, null);
+    _connector = connector;
     try {
-      await probe.onInitialPeerSettingsReceived.timeout(
-        const Duration(seconds: 5),
-      );
-    } finally {
-      socket.destroy();
+      await connector.prepare();
+      if (generation != _generation) {
+        throw const GrpcError.cancelled('Connection superseded');
+      }
+    } catch (_) {
+      connector.shutdown();
+      if (identical(_connector, connector)) _connector = null;
+      rethrow;
     }
-    if (generation != _generation) {
-      throw const GrpcError.cancelled('Connection superseded');
-    }
-    final channel = _create(config);
+    final channel = _create(config, null, connector);
     _channel = channel;
     _config = config;
     var registry = SchemaRegistry();
@@ -367,6 +420,8 @@ class GrpcEngine {
       return DiscoveryResult(registry, source, warning);
     } catch (_) {
       await channel.shutdown();
+      connector.shutdown();
+      if (identical(_connector, connector)) _connector = null;
       if (identical(_channel, channel)) _channel = null;
       rethrow;
     }
@@ -386,10 +441,7 @@ class GrpcEngine {
           final call = client.call(
             '/grpc.reflection.$version.ServerReflection/ServerReflectionInfo',
             w.finish(),
-            CallOptions(
-              timeout: const Duration(seconds: 5),
-              metadata: metadata,
-            ),
+            CallOptions(timeout: _connectionTimeout, metadata: metadata),
           );
           _calls.add(call);
           try {
