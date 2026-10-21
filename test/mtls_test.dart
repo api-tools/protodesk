@@ -128,7 +128,7 @@ void main() {
       await dir.delete(recursive: true);
     }
   });
-  test('real mTLS accepts identity through probe/reflection/local schema/authority/reconnect; rejects missing and untrusted clients', () async {
+  test('real mTLS accepts identity through shared transport/reflection/local schema/authority/reconnect; rejects missing and untrusted clients', () async {
     final schema = await loader.load(['test/fixtures/runtime.proto'], []);
     final reflection = MetadataReflection(schema);
     final fixture = CapturedFixture(schema);
